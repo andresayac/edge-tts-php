@@ -1,5 +1,5 @@
 {
-    "name": "afaya/edget-tts",
+    "name": "afaya/edge-tts",
     "description": "Microsoft Edge's TTS",
     "version": "1.0.0",
     "type": "library",
