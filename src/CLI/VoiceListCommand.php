@@ -10,7 +10,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 
-#[AsCommand(name: 'app:voice-list')]
+#[AsCommand(name: 'edge-tts:voice-list')]
 class VoiceListCommand extends Command
 {
     protected static $defaultName = 'app:voice-list';

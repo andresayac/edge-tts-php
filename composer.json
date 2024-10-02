@@ -1,7 +1,13 @@
 {
-    "name": "tu_usuario/tu_proyecto",
-    "description": "Proyecto de síntesis de voz con WebSocket",
+    "name": "afaya/edget-ts",
+    "description": "Microsoft Edge's TTS",
+    "version": "1.0.0",
     "type": "project",
+    "license": "GPL-3.0+",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/andresayac/edge-tts"
+    },
     "require": {
         "symfony/console": "^7.1",
         "ratchet/pawl": "^0.4.1",
@@ -21,8 +27,11 @@
     "scripts": {
         "start": "php main.php"
     },
+    "bin": [
+        "src/cli.php"
+    ],
     "minimum-stability": "stable",
     "require-dev": {
-        "phpunit/phpunit": "^9.0"
+        "phpunit/phpunit": "^9.6"
     }
 }
