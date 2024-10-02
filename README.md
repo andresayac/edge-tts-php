@@ -1,7 +1,5 @@
 # Edge TTS
 
-![Edge TTS Logo](link-to-your-logo) <!-- Puedes agregar un enlace a tu logo aquí -->
-
 ## Overview
 
 **Edge TTS** is a powerful Text-to-Speech (TTS) package for PHP that leverages Microsoft's Edge capabilities. This package allows you to synthesize speech from text and manage voice options easily through a command-line interface (CLI).
@@ -26,13 +24,13 @@ Command-Line Interface
 To synthesize speech from text, use the following command:
 
 ```bash
-php src/cli.php synthesize "Hello, world!"
+php src/cli.php edge-tts:synthesize --text "Hello, world!"
 ```
 
 To list available voices, run:
 
 ```bash
-php src/cli.php voices
+php src/cli.php edge-tts:voice-list
 ```
 
 
@@ -42,15 +40,15 @@ To use Edge TTS in your PHP project, include the autoload file:
 ```php
 require 'vendor/autoload.php';
 
-use App\TTS; 
+use Afaya\EdgeTS\EdgeTS; 
 
-$tts = new TTS();
-$tts->synthesize("Hello, world!", "en-US");
+$tts = new EdgeTS(); 
+$tts->synthesize("Hello, world!", "hello-world", "en-US-AriaNeural", "0%","0%","0Hz");
 ```
 
 ## Testing
 ```bash
-composer run test
+./vendor/bin/phpunit
 ```
 
 
