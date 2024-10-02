@@ -1,9 +1,8 @@
 <?php
 
-namespace App\Tests;
+namespace Afaya\EdgeTTS\Tests;
 
-use App\CLI\SynthesizeCommand;
-use Symfony\Component\Console\Application;
+use Afaya\EdgeTTS\CLI\SynthesizeCommand;
 use Symfony\Component\Console\Tester\CommandTester;
 use PHPUnit\Framework\TestCase;
 

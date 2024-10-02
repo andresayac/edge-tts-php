@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Config;
+namespace Afaya\EdgeTTS\Config;
 
 class Constants
 {

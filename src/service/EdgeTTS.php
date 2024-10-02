@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Service;
+namespace Afaya\EdgeTTS\Service;
 
 use Ratchet\Client\Connector;
 use Ramsey\Uuid\Uuid;
-use App\Config\Constants;
+use Afaya\EdgeTTS\Config\Constants;
 use React\EventLoop\Loop;
 
 class EdgeTTS
@@ -75,7 +75,7 @@ class EdgeTTS
     }
 
 
-    public function generateAudio(string $text, string $output_path, string $voice, string $rate, string $volume, string $pitch): void
+    public function synthesize(string $text, string $output_path, string $voice, string $rate, string $volume, string $pitch): void
     {
         $this->output_path = $output_path;
 

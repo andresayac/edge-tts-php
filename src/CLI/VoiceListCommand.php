@@ -1,9 +1,9 @@
 <?php
 
-namespace App\CLI;
+namespace Afaya\EdgeTTS\CLI;
 
 
-use App\Service\EdgeTTS;
+use Afaya\EdgeTTS\Service\EdgeTTS;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;

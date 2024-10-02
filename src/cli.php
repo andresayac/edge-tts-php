@@ -6,8 +6,8 @@ require __DIR__ . '/../vendor/autoload.php';
 
 
 use Symfony\Component\Console\Application;
-use App\CLI\SynthesizeCommand;
-use App\CLI\VoiceListCommand;
+use Afaya\EdgeTTS\CLI\SynthesizeCommand;
+use Afaya\EdgeTTS\CLI\VoiceListCommand;
 
 // Crear una nueva instancia de la aplicación de consola
 $application = new Application('Edge TTS CLI', '1.0');

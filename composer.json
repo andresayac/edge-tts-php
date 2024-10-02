@@ -1,5 +1,5 @@
 {
-    "name": "afaya/edget-ts",
+    "name": "afaya/edget-tts",
     "description": "Microsoft Edge's TTS",
     "version": "1.0.0",
     "type": "project",
@@ -16,12 +16,12 @@
     },
     "autoload": {
         "psr-4": {
-            "App\\": "src/"
+             "Afaya\\EdgeTTS\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "App\\Tests\\": "tests/"
+            "Afaya\\EdgeTTS\\Tests\\": "tests/"
         }
     },
     "scripts": {
