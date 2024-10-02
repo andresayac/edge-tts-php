@@ -24,13 +24,13 @@ Command-Line Interface
 To synthesize speech from text, use the following command:
 
 ```bash
-php src/cli.php edge-tts:synthesize --text "Hello, world!"
+php .\vendor\bin\edge-tts edge-tts:synthesize --text "Hello, world!"
 ```
 
 To list available voices, run:
 
 ```bash
-php src/cli.php edge-tts:voice-list
+php .\vendor\bin\edge-tts edge-tts:voice-list
 ```
 
 
@@ -38,11 +38,13 @@ php src/cli.php edge-tts:voice-list
 To use Edge TTS in your PHP project, include the autoload file:
 
 ```php
+<?php
+
 require 'vendor/autoload.php';
 
-use Afaya\EdgeTS\EdgeTS; 
+use Afaya\EdgeTTS\Service\EdgeTTS;
 
-$tts = new EdgeTS(); 
+$tts = new EdgeTTS(); 
 $tts->synthesize("Hello, world!", "hello-world", "en-US-AriaNeural", "0%","0%","0Hz");
 ```
 

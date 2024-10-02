@@ -1,7 +1,7 @@
 {
     "name": "afaya/edge-tts",
     "description": "Microsoft Edge's TTS",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "type": "library",
     "license": "GPL-3.0+",
     "repository": {
@@ -24,11 +24,8 @@
             "Afaya\\EdgeTTS\\Tests\\": "tests/"
         }
     },
-    "scripts": {
-        "start": "php main.php"
-    },
     "bin": [
-        "src/cli.php"
+        "src/edge-tts.php"
     ],
     "minimum-stability": "stable",
     "require-dev": {
