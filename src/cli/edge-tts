@@ -9,7 +9,7 @@ use Symfony\Component\Console\Application;
 use Afaya\EdgeTTS\Commands\SynthesizeCommand;
 use Afaya\EdgeTTS\Commands\VoiceListCommand;
 
-$application = new Application('Edge TTS CLI', '1.1.0');
+$application = new Application('Edge TTS CLI', '1.1.1');
 
 $application->addCommands([
     new SynthesizeCommand(),
