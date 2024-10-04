@@ -8,8 +8,13 @@
 
 - **Text-to-Speech**: Convert text into natural-sounding speech using Microsoft Edge's TTS capabilities.
 - **Multiple Voices**: Access a variety of voices to suit your project's needs.
+- **Audio Export Options**: Export synthesized audio in different formats (raw, base64, or directly to a file).
 - **Command-Line Interface**: Use a simple CLI for easy access to functionality.
 - **Easy Integration**: Modular structure allows for easy inclusion in existing PHP projects.
+
+
+Command-Line Interface: Use a simple CLI for easy access to functionality.
+Easy Integration: Modular structure allows for easy inclusion in existing PHP projects.
 
 ## Installation
 
@@ -40,13 +45,36 @@ To use Edge TTS in your PHP project, include the autoload file:
 ```php
 <?php
 
-require 'vendor/autoload.php';
+require __DIR__ . '/vendor/autoload.php';
 
 use Afaya\EdgeTTS\Service\EdgeTTS;
 
-$tts = new EdgeTTS(); 
-$tts->synthesize("Hello, world!", "hello-world", "en-US-AriaNeural", "0%","0%","0Hz");
+// Initialize the EdgeTTS service
+$tts = new EdgeTTS();
+
+// Get voices
+$voices = $tts->getVoices();  
+// var_dump($voices);  // array -> use ShortName with the name of the voice
+
+// Synthesize text with options for voice, rate, volume, and pitch
+$tts->synthesize("Hello, world!", 'en-US-AriaNeural', [
+    'rate' => '0%',       // Speech rate (range: -100% to 100%)
+    'volume' => '0%',     // Speech volume (range: -100% to 100%)
+    'pitch' => '0Hz'      // Voice pitch (range: -100Hz to 100Hz)
+]);
+
+// Export synthesized audio in different formats
+$base64Audio = $tts->toBase64();   // Get audio as base64
+$tts->toFile("output.wav");        // Save audio to file
+$rawAudio = $tts->toRaw();         // Get raw audio stream
 ```
+
+## Export Options
+After synthesizing speech, you can export the audio in various formats:
+
+- ```toBase64```: Returns the audio as a Base64 string.
+- ```toFile```: Saves the audio to a specified file (e.g., "output.wav").
+- ```toRaw```: Returns the raw audio stream.
 
 ## Testing
 ```bash
@@ -61,10 +89,8 @@ We welcome contributions! Please read our CONTRIBUTING.md for guidelines on how 
 This project is licensed under the GNU General Public License v3 (GPLv3).
 
 ## Acknowledgments
-Symfony Console for building the CLI.
-Microsoft Edge for TTS capabilities.
 
-It is possible to use the `edge-tts` module directly from Python. For a list of example applications:
+We would like to extend our gratitude to the developers and contributors of the following projects for their inspiration and groundwork:
 
 * https://github.com/rany2/edge-tts/tree/master/examples
 * https://github.com/rany2/edge-tts/blob/master/src/edge_tts/util.py

@@ -1,6 +1,6 @@
 <?php
 
-namespace Afaya\EdgeTTS\CLI;
+namespace Afaya\EdgeTTS\Commands;
 
 
 use Afaya\EdgeTTS\Service\EdgeTTS;
@@ -28,7 +28,7 @@ class VoiceListCommand extends Command
 
         $output->writeln("Lista de voces disponibles:");
         foreach ($voices as $voice) {
-            $output->writeln(" - {$voice}");
+            $output->writeln(" - {$voice['ShortName']}");
         }
 
         return Command::SUCCESS;

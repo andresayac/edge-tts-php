@@ -2,7 +2,7 @@
 
 namespace Afaya\EdgeTTS\Tests;
 
-use Afaya\EdgeTTS\CLI\SynthesizeCommand;
+use Afaya\EdgeTTS\Commands\SynthesizeCommand;
 use Symfony\Component\Console\Tester\CommandTester;
 use PHPUnit\Framework\TestCase;
 
@@ -13,7 +13,6 @@ class SynthesizeCommandTest extends TestCase
         $command = new SynthesizeCommand();
         $commandTester = new CommandTester($command);
 
-        // Ejecutar el comando
         $resultCode = $commandTester->execute([
             '--text' => 'Hello World',
             '--voice' => 'en-US-AriaNeural',

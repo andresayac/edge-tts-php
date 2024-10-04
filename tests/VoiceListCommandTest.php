@@ -2,7 +2,7 @@
 
 namespace Afaya\EdgeTTS\Tests;
 
-use Afaya\EdgeTTS\CLI\VoiceListCommand;
+use Afaya\EdgeTTS\Commands\VoiceListCommand;
 use Symfony\Component\Console\Tester\CommandTester;
 use PHPUnit\Framework\TestCase;
 

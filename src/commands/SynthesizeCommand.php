@@ -1,6 +1,6 @@
 <?php
 
-namespace Afaya\EdgeTTS\CLI;
+namespace Afaya\EdgeTTS\Commands;
 
 use Afaya\EdgeTTS\Service\EdgeTTS;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -42,12 +42,14 @@ class SynthesizeCommand extends Command
             return Command::FAILURE;
         }
 
-
-
-        $webSocketService = new EdgeTTS();
-        $webSocketService->synthesize($text, $output_file, $voice, $rate, $volume, $pitch);
-
-        $output->writeln("Audio file generated: {$output_file}.wav");
+        $tts = new EdgeTTS();
+        $tts->synthesize($text, $voice, [
+            'rate' => $rate,
+            'volume' => $volume,
+            'pitch' => $pitch
+        ]);
+        $tts->toFile("{$output_file}");
+        $output->writeln("Audio file generated: {$output_file}.mp3");
 
         return Command::SUCCESS;
     }
