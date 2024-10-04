@@ -1,0 +1,24 @@
+#!/usr/bin/php
+<?php
+
+declare(strict_types=1);
+
+require 'vendor/autoload.php';
+
+use Symfony\Component\Console\Application;
+use Afaya\EdgeTTS\Commands\SynthesizeCommand;
+use Afaya\EdgeTTS\Commands\VoiceListCommand;
+
+$application = new Application('Edge TTS CLI', '1.1.0');
+
+$application->addCommands([
+    new SynthesizeCommand(),
+    new VoiceListCommand(),
+]);
+
+try {
+    $application->run();
+} catch (\Exception $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+}
