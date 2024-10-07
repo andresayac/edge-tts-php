@@ -9,9 +9,9 @@
         "url": "https://github.com/andresayac/edge-tts"
     },
     "require": {
-        "symfony/console": "^7.1",
+        "symfony/console": "^7.1.5",
         "ratchet/pawl": "^0.4.1",
-        "ramsey/uuid": "^4.7",
+        "ramsey/uuid": "^4.7.6",
         "react/event-loop": "^1.5"
     },
     "autoload": {
