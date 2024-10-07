@@ -9,6 +9,7 @@
         "url": "https://github.com/andresayac/edge-tts"
     },
     "require": {
+        "php": ">=8.1",
         "symfony/console": "^6.4.6",
         "ratchet/pawl": "^0.4.1",
         "ramsey/uuid": "^4.7.6",
