@@ -21,8 +21,12 @@ Easy Integration: Modular structure allows for easy inclusion in existing PHP pr
 You can install Edge TTS via Composer. Run the following command in your terminal:
 
 ```bash
-composer require afaya/edge-tts
+composer require php-cpm/edge-tts
 ```
+
+this package is a fork of the original [afaya/edge-tts](https://github.com/andresayac/edge-tts-php) package, with some improvements and fixes.
+
+we downgraded the dependencies to be compatible from php 8.1+ to php 7.4+ while keeping the original functionality.
 
 ## Usage
 Command-Line Interface
