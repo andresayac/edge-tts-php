@@ -13,13 +13,41 @@ class EdgeTTS
 {
     private array $audio_stream = [];
     private string $audio_format = 'mp3';
+    private array $headers;
 
-    public function __construct() {}
+    public function __construct() {
+        $this->headers = array_merge(
+            Constants::BASE_HEADERS,
+            Constants::WSS_HEADERS
+        );
+    }
 
     public function getVoices(): array
     {
-        $json = file_get_contents(Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN);
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => $this->formatHeaders(array_merge(
+                    Constants::BASE_HEADERS,
+                    Constants::VOICE_HEADERS
+                ))
+            ]
+        ]);
+
+        $json = file_get_contents(
+            Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN,
+            false,
+            $context
+        );
+        
+        if ($json === false) {
+            throw new RuntimeException("Failed to fetch voices list");
+        }
+
         $data = json_decode($json, true);
+        if (!is_array($data)) {
+            throw new RuntimeException("Invalid response from voices API");
+        }
 
         $voices = [];
         $keysToUnset = ['VoiceTag', 'SuggestedCodec', 'Status'];
@@ -31,6 +59,14 @@ class EdgeTTS
         return $voices;
     }
 
+    private function formatHeaders(array $headers): string
+    {
+        return implode("\r\n", array_map(
+            fn($k, $v) => "$k: $v",
+            array_keys($headers),
+            array_values($headers)
+        ));
+    }
 
     private function checkVoice(string $voice): string
     {
@@ -108,11 +144,18 @@ class EdgeTTS
         $loop = Loop::get();
         $connector = new Connector($loop);
         $req_id = Uuid::uuid4()->toString();
-        $url = Constants::WSS_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN . "&ConnectionId=" . $req_id;
+        
+        $url = Constants::WSS_URL 
+            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN 
+            . "&ConnectionId=" . $req_id
+            . "&Sec-MS-GEC=" . Constants::generateSecMsGec()
+            . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
 
         $SSML_text = $this->getSSML($text, $voice, $options);
 
-        $connector($url)->then(
+        $connector($url, [], array_merge($this->headers, [
+            'Sec-WebSocket-Protocol' => 'synthesize'
+        ]))->then(
             function ($ws) use ($SSML_text, $req_id) {
                 $this->sendTTSRequest($ws, $SSML_text, $req_id);
             },
@@ -132,7 +175,11 @@ class EdgeTTS
         $message = $this->buildTTSConfigMessage();
         $ws->send($message);
 
-        $message = "X-RequestId:{$req_id}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:" . $this->getXTime() . "Z\r\nPath:ssml\r\n\r\n{$SSML_text}";
+        $message = "X-RequestId:{$req_id}\r\n" .
+                  "Content-Type:application/ssml+xml\r\n" .
+                  "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+                  "Path:ssml\r\n\r\n" .
+                  $SSML_text;
         $ws->send($message);
 
         $ws->on('message', function ($data) use ($ws) {
@@ -144,8 +191,24 @@ class EdgeTTS
 
     private function buildTTSConfigMessage(): string
     {
-        return "X-Timestamp:" . $this->getXTime() . "\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" .
-            "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":false,\"wordBoundaryEnabled\":true},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}\r\n";
+        $config = [
+            'context' => [
+                'synthesis' => [
+                    'audio' => [
+                        'metadataoptions' => [
+                            'sentenceBoundaryEnabled' => false,
+                            'wordBoundaryEnabled' => true
+                        ],
+                        'outputFormat' => 'audio-24khz-48kbitrate-mono-mp3'
+                    ]
+                ]
+            ]
+        ];
+
+        return "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+               "Content-Type:application/json; charset=utf-8\r\n" .
+               "Path:speech.config\r\n\r\n" .
+               json_encode($config) . "\r\n";
     }
 
     private function processAudioData($data, $ws): void
