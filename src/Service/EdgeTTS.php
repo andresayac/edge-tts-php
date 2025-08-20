@@ -13,22 +13,44 @@ class EdgeTTS
 {
     private array $audio_stream = [];
     private string $audio_format = 'mp3';
+    private array $headers;
+    private array $word_boundaries = [];
+    private int $offset_compensation = 0;
+    private int $last_duration_offset = 0;
 
-    public function __construct() {}
+    public function __construct() {
+        $this->headers = array_merge(
+            Constants::BASE_HEADERS,
+            Constants::WSS_HEADERS
+        );
+    }
 
     public function getVoices(): array
     {
-        $url = Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN;
-
         $context = stream_context_create([
             'http' => [
                 'method' => 'GET',
-                'header' => "User-Agent: " . Constants::USER_AGENT . "\r\n"
+                'header' => $this->formatHeaders(array_merge(
+                    Constants::BASE_HEADERS,
+                    Constants::VOICE_HEADERS
+                ))
             ]
         ]);
 
-        $json = file_get_contents($url, false, $context);
+        $json = file_get_contents(
+            Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN,
+            false,
+            $context
+        );
+        
+        if ($json === false) {
+            throw new RuntimeException("Failed to fetch voices list");
+        }
+
         $data = json_decode($json, true);
+        if (!is_array($data)) {
+            throw new RuntimeException("Invalid response from voices API");
+        }
 
         $voices = [];
         $keysToUnset = ['VoiceTag', 'SuggestedCodec', 'Status'];
@@ -40,6 +62,14 @@ class EdgeTTS
         return $voices;
     }
 
+    private function formatHeaders(array $headers): string
+    {
+        return implode("\r\n", array_map(
+            fn($k, $v) => "$k: $v",
+            array_keys($headers),
+            array_values($headers)
+        ));
+    }
 
     private function checkVoice(string $voice): string
     {
@@ -118,17 +148,19 @@ class EdgeTTS
         $connector = new Connector($loop);
 
         $req_id = Uuid::uuid4()->toString();
-        $sec_Ms_GEC = $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN);
-
-        $url = Constants::WSS_URL
-            . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN
+       
+        $url = Constants::WSS_URL 
+            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN 
             . "&ConnectionId=" . $req_id
-            . "&Sec-MS-GEC=" . $sec_Ms_GEC
-            . "&Sec-MS-GEC-Version=1-130.0.2849.68";
+            . "&Sec-MS-GEC=" . Constants::generateSecMsGec()
+            . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
 
         $SSML_text = $this->getSSML($text, $voice, $options);
 
-        $connector($url, [], ['User-Agent' => Constants::USER_AGENT])->then(
+        $connector($url, [], array_merge($this->headers, [
+            'Sec-WebSocket-Protocol' => 'synthesize'
+        ]))->then(
+
             function ($ws) use ($SSML_text, $req_id) {
                 $this->sendTTSRequest($ws, $SSML_text, $req_id);
             },
@@ -148,7 +180,11 @@ class EdgeTTS
         $message = $this->buildTTSConfigMessage();
         $ws->send($message);
 
-        $message = "X-RequestId:{$req_id}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:" . $this->getXTime() . "Z\r\nPath:ssml\r\n\r\n{$SSML_text}";
+        $message = "X-RequestId:{$req_id}\r\n" .
+                  "Content-Type:application/ssml+xml\r\n" .
+                  "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+                  "Path:ssml\r\n\r\n" .
+                  $SSML_text;
         $ws->send($message);
 
         $ws->on('message', function ($data) use ($ws) {
@@ -160,20 +196,50 @@ class EdgeTTS
 
     private function buildTTSConfigMessage(): string
     {
-        return "X-Timestamp:" . $this->getXTime() . "\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" .
-            "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":false,\"wordBoundaryEnabled\":true},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}\r\n";
+        $config = [
+            'context' => [
+                'synthesis' => [
+                    'audio' => [
+                        'metadataoptions' => [
+                            'sentenceBoundaryEnabled' => false,
+                            'wordBoundaryEnabled' => true
+                        ],
+                        'outputFormat' => 'audio-24khz-48kbitrate-mono-mp3'
+                    ]
+                ]
+            ]
+        ];
+
+        return "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+               "Content-Type:application/json; charset=utf-8\r\n" .
+               "Path:speech.config\r\n\r\n" .
+               json_encode($config) . "\r\n";
     }
 
     private function processAudioData($data, $ws): void
     {
+        if (strpos($data, "Path:audio.metadata") !== false) {
+            $metadataStart = strpos($data, "\r\n\r\n") + 4;
+            $metadataJson = substr($data, $metadataStart);
+            $metadata = $this->parseMetadata($metadataJson);
+            
+            if ($metadata !== null) {
+                $this->word_boundaries[] = $metadata;
+                $this->last_duration_offset = $metadata['offset'] + $metadata['duration'];
+            }
+            return;
+        }
+
+        if (strpos($data, "Path:turn.end") !== false) {
+            $this->offset_compensation = $this->last_duration_offset + 8750000; // average padding
+            $ws->close();
+            return;
+        }
+
         $needle = "Path:audio\r\n";
         if (strpos($data, $needle) !== false) {
             $audioData = substr($data, strpos($data, $needle) + strlen($needle));
             $this->audio_stream[] = $audioData;
-        }
-
-        if (strpos($data, "Path:turn.end") !== false) {
-            $ws->close();
         }
     }
 
@@ -197,6 +263,15 @@ class EdgeTTS
     {
         if (!empty($this->audio_stream)) {
             file_put_contents($output_path . '.' . $this->audio_format, implode('', $this->audio_stream));
+            
+            // Save metadata if available
+            if (!empty($this->word_boundaries)) {
+                $metadata_path = $output_path . '.metadata.json';
+                file_put_contents(
+                    $metadata_path,
+                    implode("\n", array_map('json_encode', $this->word_boundaries))
+                );
+            }
         } else {
             throw new RuntimeException("No audio data available to save.");
         }
@@ -214,5 +289,46 @@ class EdgeTTS
     public function toBase64(): string
     {
         return base64_encode($this->toRaw());
+    }
+
+    public function saveMetadata(string $output_path): void
+    {
+        if (!empty($this->word_boundaries)) {
+            file_put_contents(
+                $output_path,
+                implode("\n", array_map('json_encode', $this->word_boundaries))
+            );
+        } else {
+            throw new RuntimeException("No metadata available to save.");
+        }
+    }
+
+    private function parseMetadata(string $data): ?array
+    {
+        $metadata = json_decode($data, true);
+        if (!isset($metadata['Metadata'])) {
+            return null;
+        }
+
+        foreach ($metadata['Metadata'] as $meta_obj) {
+            if ($meta_obj['Type'] === 'WordBoundary') {
+                $current_offset = $meta_obj['Data']['Offset'] + $this->offset_compensation;
+                $current_duration = $meta_obj['Data']['Duration'];
+                
+                return [
+                    'type' => 'WordBoundary',
+                    'offset' => $current_offset,
+                    'duration' => $current_duration,
+                    'text' => $meta_obj['Data']['text']['Text']
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    public function getWordBoundaries(): array
+    {
+        return $this->word_boundaries;
     }
 }

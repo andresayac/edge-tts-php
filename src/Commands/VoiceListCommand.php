@@ -2,23 +2,22 @@
 
 namespace Afaya\EdgeTTS\Commands;
 
-
 use Afaya\EdgeTTS\Service\EdgeTTS;
-use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
-
-#[AsCommand(name: 'edge-tts:voice-list')]
+/**
+ * @AsCommand(name="edge-tts:voice-list")
+ */
 class VoiceListCommand extends Command
 {
-    protected static $defaultName = 'app:voice-list';
+    protected static $defaultName = 'edge-tts:voice-list';
+    protected static $defaultDescription = 'Get the list of available voices';
 
     protected function configure(): void
     {
-        $this
-            ->setDescription('Get the list of available voices');
+        $this->setDescription(self::$defaultDescription);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int

@@ -3,16 +3,18 @@
 namespace Afaya\EdgeTTS\Commands;
 
 use Afaya\EdgeTTS\Service\EdgeTTS;
-use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-#[AsCommand(name: 'edge-tts:synthesize')]
+/**
+ * @AsCommand(name="edge-tts:synthesize")
+ */
 class SynthesizeCommand extends Command
 {
-    protected static $defaultName = 'app:synthesize';
+    protected static $defaultName = 'edge-tts:synthesize';
+    protected static $defaultDescription = 'Edge TTS: synthesize text to audio';
 
     protected function configure(): void
     {
