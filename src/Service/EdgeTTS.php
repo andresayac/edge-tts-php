@@ -18,7 +18,8 @@ class EdgeTTS
     private int $offset_compensation = 0;
     private int $last_duration_offset = 0;
 
-    public function __construct() {
+    public function __construct()
+    {
         $this->headers = array_merge(
             Constants::BASE_HEADERS,
             Constants::WSS_HEADERS
@@ -38,11 +39,11 @@ class EdgeTTS
         ]);
 
         $json = file_get_contents(
-            Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN,
+            Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN) . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION),
             false,
             $context
         );
-        
+
         if ($json === false) {
             throw new RuntimeException("Failed to fetch voices list");
         }
@@ -148,11 +149,11 @@ class EdgeTTS
         $connector = new Connector($loop);
 
         $req_id = Uuid::uuid4()->toString();
-       
-        $url = Constants::WSS_URL 
-            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN 
+
+        $url = Constants::WSS_URL
+            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
             . "&ConnectionId=" . $req_id
-            . "&Sec-MS-GEC=" . Constants::generateSecMsGec()
+            . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN)
             . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
 
         $SSML_text = $this->getSSML($text, $voice, $options);
@@ -181,10 +182,10 @@ class EdgeTTS
         $ws->send($message);
 
         $message = "X-RequestId:{$req_id}\r\n" .
-                  "Content-Type:application/ssml+xml\r\n" .
-                  "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
-                  "Path:ssml\r\n\r\n" .
-                  $SSML_text;
+            "Content-Type:application/ssml+xml\r\n" .
+            "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+            "Path:ssml\r\n\r\n" .
+            $SSML_text;
         $ws->send($message);
 
         $ws->on('message', function ($data) use ($ws) {
@@ -211,9 +212,9 @@ class EdgeTTS
         ];
 
         return "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
-               "Content-Type:application/json; charset=utf-8\r\n" .
-               "Path:speech.config\r\n\r\n" .
-               json_encode($config) . "\r\n";
+            "Content-Type:application/json; charset=utf-8\r\n" .
+            "Path:speech.config\r\n\r\n" .
+            json_encode($config) . "\r\n";
     }
 
     private function processAudioData($data, $ws): void
@@ -222,7 +223,7 @@ class EdgeTTS
             $metadataStart = strpos($data, "\r\n\r\n") + 4;
             $metadataJson = substr($data, $metadataStart);
             $metadata = $this->parseMetadata($metadataJson);
-            
+
             if ($metadata !== null) {
                 $this->word_boundaries[] = $metadata;
                 $this->last_duration_offset = $metadata['offset'] + $metadata['duration'];
@@ -244,6 +245,9 @@ class EdgeTTS
     }
 
 
+    /**
+     * Generates a Sec-MS-GEC token.
+     */
     private function generateSecMsGec(string $trustedClientToken): string
     {
         $ticks = (int) floor(time() + 11644473600);
@@ -263,15 +267,6 @@ class EdgeTTS
     {
         if (!empty($this->audio_stream)) {
             file_put_contents($output_path . '.' . $this->audio_format, implode('', $this->audio_stream));
-            
-            // Save metadata if available
-            if (!empty($this->word_boundaries)) {
-                $metadata_path = $output_path . '.metadata.json';
-                file_put_contents(
-                    $metadata_path,
-                    implode("\n", array_map('json_encode', $this->word_boundaries))
-                );
-            }
         } else {
             throw new RuntimeException("No audio data available to save.");
         }
@@ -314,7 +309,7 @@ class EdgeTTS
             if ($meta_obj['Type'] === 'WordBoundary') {
                 $current_offset = $meta_obj['Data']['Offset'] + $this->offset_compensation;
                 $current_duration = $meta_obj['Data']['Duration'];
-                
+
                 return [
                     'type' => 'WordBoundary',
                     'offset' => $current_offset,

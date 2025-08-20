@@ -1,3 +1,4 @@
 vendor/
 *.wav
 *.mp3
+*.json
