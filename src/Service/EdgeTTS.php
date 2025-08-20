@@ -173,6 +173,98 @@ class EdgeTTS
         $loop->run();
     }
 
+    public function synthesizeStream(string $text, string $voice = 'en-US-AnaNeural', array $options = [], ?callable $onChunk = null): void
+    {
+        $this->audio_stream = [];
+
+        $loop = Loop::get();
+        $connector = new Connector($loop);
+
+        $reqId     = Uuid::uuid4()->toString();
+        $secMsGEC  = $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN);
+
+
+        $url = Constants::WSS_URL
+            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
+            . "&ConnectionId="       . $reqId
+            . "&Sec-MS-GEC="         . $secMsGEC
+            . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
+
+        $SSML = $this->getSSML($text, $voice, $options);
+
+        $timeout = $loop->addTimer(30.0, function () use (&$ws) {
+            if (isset($ws) && $ws && $ws->readyState === 1 /* OPEN */) {
+                $ws->close();
+            }
+        });
+
+        $connector($url, [], array_merge($this->headers, [
+            'Sec-WebSocket-Protocol' => 'synthesize',
+        ]))->then(
+            function ($socket) use ($SSML, $reqId, $loop, $timeout, $onChunk, &$ws) {
+                $ws = $socket;
+
+                $ws->send($this->buildTTSConfigMessage());
+
+                $speechMsg =
+                    "X-RequestId:{$reqId}\r\n" .
+                    "Content-Type:application/ssml+xml\r\n" .
+                    "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+                    "Path:ssml\r\n\r\n" .
+                    $SSML;
+                $ws->send($speechMsg);
+
+
+                $ws->on('message', function ($data) use ($ws, $onChunk) {
+                    if (strpos($data, "Path:audio.metadata") !== false) {
+                        $metadataStart = strpos($data, "\r\n\r\n") + 4;
+                        $metadataJson  = substr($data, $metadataStart);
+                        $meta = $this->parseMetadata($metadataJson);
+                        if ($meta !== null) {
+                            $this->word_boundaries[] = $meta;
+                            $this->last_duration_offset = $meta['offset'] + $meta['duration'];
+                        }
+                        return;
+                    }
+                    
+                    if (strpos($data, "Path:turn.end") !== false) {
+                        $this->offset_compensation = $this->last_duration_offset + 8750000;
+                        $ws->close();
+                        return;
+                    }
+
+                    $needle = "Path:audio\r\n";
+                    $pos = strpos($data, $needle);
+                    if ($pos !== false) {
+                        $audioChunk = substr($data, $pos + strlen($needle));
+                        $this->audio_stream[] = $audioChunk;
+
+
+                        if ($onChunk) {
+                            $onChunk($audioChunk); // <- string binario del fragmento
+                        }
+                    }
+                });
+
+                $ws->on('error', function ($e) use ($loop, $timeout) {
+                    $loop->cancelTimer($timeout);
+                    throw new RuntimeException("WebSocket error: " . $e->getMessage());
+                });
+
+                $ws->on('close', function () use ($loop, $timeout) {
+                    $loop->cancelTimer($timeout);
+                    $loop->stop();
+                });
+            },
+            function ($e) {
+                throw new RuntimeException("Connect error: " . $e->getMessage());
+            }
+        );
+
+        // Corre hasta que el WS cierre
+        $loop->run();
+    }
+
     /**
      * Sends the TTS request over WebSocket and processes the audio stream.
      */
@@ -263,6 +355,69 @@ class EdgeTTS
         return (new \DateTime())->format('Y-m-d\TH:i:s.v\Z');
     }
 
+    /**
+     * Lee el bitrate (kbps) desde el formato, ej: audio-24khz-48kbitrate-mono-mp3 -> 48.
+     */
+    private function parseBitrateKbpsFromFormat(?string $format = null): ?int
+    {
+        $format = $format ?? $this->audio_format;
+        if (preg_match('/-(\d+)kbitrate-/', $format, $m)) {
+            return (int) $m[1];
+        }
+        return null;
+    }
+
+    /**
+     * Tamaño total en bytes del audio acumulado.
+     */
+    public function getSizeBytes(): int
+    {
+        if (empty($this->audio_stream)) {
+            throw new \RuntimeException("No audio data available");
+        }
+        // strlen en PHP cuenta bytes en strings binarios
+        return strlen($this->toRaw());
+    }
+
+    /**
+     * Estima la duración (en segundos).
+     * 1) Si el formato incluye Xkbitrate, usa size_bytes / (X*1000/8).
+     * 2) Fallback: asume PCM 24kHz mono 16-bit => 48,000 bytes/s.
+     */
+    public function getDuration(): float
+    {
+        if (empty($this->audio_stream)) {
+            throw new \RuntimeException("No audio data available");
+        }
+
+        $sizeBytes = $this->getSizeBytes();
+
+        // 1) Preferir bitrate declarado en el formato (más realista para MP3)
+        $kbps = $this->parseBitrateKbpsFromFormat($this->audio_format);
+        if ($kbps !== null && $kbps > 0) {
+            $bytesPerSecond = ($kbps * 1000) / 8.0; // kbps -> bytes/s
+            return $sizeBytes / $bytesPerSecond;
+        }
+
+        // 2) Fallback razonable (PCM 24kHz mono 16-bit)
+        $fallbackBytesPerSecond = 24000 * 2; // 24k muestras/s * 2 bytes
+        return $sizeBytes / $fallbackBytesPerSecond;
+    }
+
+    /**
+     * Información básica del audio.
+     */
+    public function getAudioInfo(): array
+    {
+        $size = $this->getSizeBytes();
+
+        return [
+            'size'              => $size,
+            'format'            => $this->audio_format,
+            'estimatedDuration' => $this->getDuration(),
+        ];
+    }
+
     public function toFile(string $output_path): void
     {
         if (!empty($this->audio_stream)) {
@@ -286,15 +441,29 @@ class EdgeTTS
         return base64_encode($this->toRaw());
     }
 
+    public function toStream()
+    {
+        if (empty($this->audio_stream)) {
+            throw new \RuntimeException("No audio data available. Did you run synthesize() first?");
+        }
+
+        $stream = fopen('php://memory', 'r+');
+        fwrite($stream, implode('', $this->audio_stream));
+        rewind($stream);
+
+        return $stream;
+    }
+
     public function saveMetadata(string $output_path): void
     {
-        if (!empty($this->word_boundaries)) {
-            file_put_contents(
-                $output_path,
-                implode("\n", array_map('json_encode', $this->word_boundaries))
-            );
-        } else {
-            throw new RuntimeException("No metadata available to save.");
+        if (empty($this->word_boundaries)) {
+            throw new \RuntimeException("No metadata available to save.");
+        }
+
+        $json = json_encode($this->word_boundaries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+
+        if (file_put_contents($output_path, $json . PHP_EOL) === false) {
+            throw new \RuntimeException("Failed to write metadata file.");
         }
     }
 

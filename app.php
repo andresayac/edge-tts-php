@@ -21,5 +21,25 @@ $tts->synthesize("Hello, world!", 'en-US-AriaNeural', [
 // Example export methods for the audio
 $tts->toBase64();
 $tts->toFile("output");
+$tts->toStream();
+$tts->saveMetadata("metadata.json");
 $tts->toRaw();
+
+// Get audio info
+var_dump($tts->getAudioInfo());
+// Get duration in seconds
+var_dump($tts->getDuration());
+
+// Get size in bytes
+var_dump($tts->getSizeBytes());
+
+// Get audio stream
+$tts->synthesizeStream(
+    "Hello world from streaming TTS",
+    'en-US-AnaNeural',
+    [],
+    function (string $chunk) {
+        file_put_contents('out.mp3', $chunk, FILE_APPEND);
+    }
+);
 
