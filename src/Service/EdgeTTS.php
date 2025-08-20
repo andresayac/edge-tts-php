@@ -18,7 +18,16 @@ class EdgeTTS
 
     public function getVoices(): array
     {
-        $json = file_get_contents(Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN);
+        $url = Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN;
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => "User-Agent: " . Constants::USER_AGENT . "\r\n"
+            ]
+        ]);
+
+        $json = file_get_contents($url, false, $context);
         $data = json_decode($json, true);
 
         $voices = [];
@@ -38,14 +47,14 @@ class EdgeTTS
         $matchedVoice = array_filter($voices, function ($v) use ($voice) {
             return $v['ShortName'] === $voice;
         });
-    
+
         if (empty($matchedVoice)) {
             throw new InvalidArgumentException("Invalid voice. Use getVoices() to get a list of available voices.");
         }
-    
+
         return reset($matchedVoice)['ShortName'];
     }
-    
+
 
     private function getSSML(string $text, string $voice, array $options = []): string
     {
@@ -107,12 +116,19 @@ class EdgeTTS
     {
         $loop = Loop::get();
         $connector = new Connector($loop);
+
         $req_id = Uuid::uuid4()->toString();
-        $url = Constants::WSS_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN . "&ConnectionId=" . $req_id;
+        $sec_Ms_GEC = $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN);
+
+        $url = Constants::WSS_URL
+            . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN
+            . "&ConnectionId=" . $req_id
+            . "&Sec-MS-GEC=" . $sec_Ms_GEC
+            . "&Sec-MS-GEC-Version=1-130.0.2849.68";
 
         $SSML_text = $this->getSSML($text, $voice, $options);
 
-        $connector($url)->then(
+        $connector($url, [], ['User-Agent' => Constants::USER_AGENT])->then(
             function ($ws) use ($SSML_text, $req_id) {
                 $this->sendTTSRequest($ws, $SSML_text, $req_id);
             },
@@ -160,6 +176,17 @@ class EdgeTTS
             $ws->close();
         }
     }
+
+
+    private function generateSecMsGec(string $trustedClientToken): string
+    {
+        $ticks = (int) floor(time() + 11644473600);
+        $rounded = $ticks - ($ticks % 300);
+        $windowsTicks = $rounded * 10000000;
+        $data = (string) $windowsTicks . $trustedClientToken;
+        return strtoupper(hash('sha256', $data));
+    }
+
 
     private function getXTime(): string
     {
