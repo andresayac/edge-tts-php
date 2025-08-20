@@ -8,6 +8,7 @@ class Constants
     public const BASE_URL = 'speech.platform.bing.com/consumer/speech/synthesize/readaloud';
     public const WSS_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
     public const VOICES_URL = 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list';
+
     
     public const CHROMIUM_FULL_VERSION = '130.0.2849.68';
     public const CHROMIUM_MAJOR_VERSION = '130';

@@ -77,14 +77,14 @@ class EdgeTTS
         $matchedVoice = array_filter($voices, function ($v) use ($voice) {
             return $v['ShortName'] === $voice;
         });
-    
+
         if (empty($matchedVoice)) {
             throw new InvalidArgumentException("Invalid voice. Use getVoices() to get a list of available voices.");
         }
-    
+
         return reset($matchedVoice)['ShortName'];
     }
-    
+
 
     private function getSSML(string $text, string $voice, array $options = []): string
     {
@@ -146,8 +146,9 @@ class EdgeTTS
     {
         $loop = Loop::get();
         $connector = new Connector($loop);
+
         $req_id = Uuid::uuid4()->toString();
-        
+       
         $url = Constants::WSS_URL 
             . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN 
             . "&ConnectionId=" . $req_id
@@ -159,6 +160,7 @@ class EdgeTTS
         $connector($url, [], array_merge($this->headers, [
             'Sec-WebSocket-Protocol' => 'synthesize'
         ]))->then(
+
             function ($ws) use ($SSML_text, $req_id) {
                 $this->sendTTSRequest($ws, $SSML_text, $req_id);
             },
@@ -240,6 +242,17 @@ class EdgeTTS
             $this->audio_stream[] = $audioData;
         }
     }
+
+
+    private function generateSecMsGec(string $trustedClientToken): string
+    {
+        $ticks = (int) floor(time() + 11644473600);
+        $rounded = $ticks - ($ticks % 300);
+        $windowsTicks = $rounded * 10000000;
+        $data = (string) $windowsTicks . $trustedClientToken;
+        return strtoupper(hash('sha256', $data));
+    }
+
 
     private function getXTime(): string
     {
