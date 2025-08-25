@@ -56,8 +56,9 @@ class EdgeTTS
         $voices = [];
         $keysToUnset = ['VoiceTag', 'SuggestedCodec', 'Status'];
 
-        foreach ($data as $voice) {            
-            $voice['FriendlyName'] = $voice['FriendlyName'] ?? $voice['LocalName'];
+        foreach ($data as $voice) {
+            $voice['FriendlyName'] = $voice['FriendlyName'] ?? $voice['LocalName'] ;
+            $voice['FriendlyName'] = "{$voice['FriendlyName']} ({$voice['VoiceType']}) - {$voice['LocaleName']}";
             $voices[] = array_diff_key($voice, array_flip($keysToUnset));
         }
 
