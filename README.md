@@ -14,6 +14,7 @@
 - **Command-Line Interface**: Use a simple CLI for easy access to functionality.
 - **Easy Integration**: Modular structure allows for seamless inclusion in existing PHP projects.
 - **Extended Compatibility**: Compatible from PHP 7.4+ to PHP 8.1+ 
+- **SSML Custom**: 🥳🥳 Edge TTS accepts raw SSML with all characteristics of Azure AI Speech.
 
 ## Requirements
 
@@ -41,11 +42,71 @@ To synthesize speech from text:
 php ./vendor/bin/edge-tts edge-tts:synthesize --text "Hello, world!"
 ```
 
+From file in format SSML:
+```bash
+php ./vendor/bin/edge-tts edge-tts:synthesize --file "ssml.txt" --ssml
+```
+
 To list available voices:
 
 ```bash
 php ./vendor/bin/edge-tts edge-tts:voice-list
 ```
+
+#### Custom SSML (Advanced)
+Edge TTS accepts raw SSML so you can control prosody, styles, pauses, pronunciations, and more. You can pass SSML from code or the CLI. By default the library auto-detects if your input is SSML; you can also force the mode.
+
+More information
+[Azure AI Speech](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure)
+
+### SSML-builder Javascript
+[@andresaya/ssml-builder](https://www.npmjs.com/package/@andresaya/ssml-builder) A powerful, type-safe TypeScript library for building Speech Synthesis Markup Language (SSML) documents. Create expressive text-to-speech applications with Azure Speech Service and other SSML-compliant engines.
+
+#### What the library does for you
+
+- Auto-detect / force mode: options.inputType may be 'auto' | 'ssml' | 'text' (default: auto).
+- Validation: Throws helpful errors if SSML is malformed (e.g., missing <speak>, <voice>, or the synthesis namespace).
+- Voice injection: If your SSML lacks <voice>, it injects one with the voice you passed.
+- Text wrapping: If you pass plain text (or inputType: 'text'), it wraps it in a valid SSML envelope using your rate, pitch, and volume.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use Afaya\EdgeTTS\Service\EdgeTTS;
+
+// Initialize the EdgeTTS service
+$tts = new EdgeTTS();
+
+$ssml = `
+<speak version="1.0"
+       xmlns="http://www.w3.org/2001/10/synthesis"
+       xmlns:mstts="https://www.w3.org/2001/mstts"
+       xml:lang="es-CO">
+  <voice name="es-CO-GonzaloNeural">
+    <mstts:express-as style="narration-professional">
+      <prosody rate="+5%" pitch="+10Hz" volume="+0%">
+        Hola, este es un ejemplo de <emphasis>SSML</emphasis>.
+        <break time="400ms" />
+        El número es <say-as interpret-as="cardinal">2025</say-as>.
+        La palabra se pronuncia
+        <phoneme alphabet="ipa" ph="ˈxola">hola</phoneme>.
+      </prosody>
+    </mstts:express-as>
+  </voice>
+</speak>`;
+
+// Auto-detects SSML, or force it with inputType: 'ssml'
+// Synthesize text with options for voice, rate, volume, and pitch
+$tts->synthesize($ssml);
+
+// Export synthesized audio in different formats
+$base64Audio = $tts->toBase64();    // Get audio as base64
+$tts->toFile("output");             // Save audio to file
+$rawAudio = $tts->toRaw();          // Get raw audio stream
+```
+
 
 ### Integration into Your Project
 

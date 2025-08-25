@@ -12,7 +12,24 @@ $tts = new EdgeTTS();
 $voices = $tts->getVoices();  
 // var_dump($voices);  // array -> use ShortName with the name of the voice
 
-$tts->synthesize("Hello, world!", 'en-US-AriaNeural', [
+$ssml = '<speak version="1.0"
+       xmlns="http://www.w3.org/2001/10/synthesis"
+       xmlns:mstts="https://www.w3.org/2001/mstts"
+       xml:lang="es-CO">
+  <voice name="es-CO-GonzaloNeural">
+    <mstts:express-as style="narration-professional">
+      <prosody rate="+5%" pitch="+10Hz" volume="+0%">
+        Hola, este es un ejemplo de <emphasis>SSML</emphasis>.
+        <break time="400ms" />
+        El número es <say-as interpret-as="cardinal">2025</say-as>.
+        La palabra se pronuncia
+        <phoneme alphabet="ipa" ph="ˈxola">hola</phoneme>.
+      </prosody>
+    </mstts:express-as>
+  </voice>
+</speak>';
+
+$tts->synthesize($ssml, 'en-US-AriaNeural', [
     'rate' => '0%',
     'volume' => '0%',
     'pitch' => '0Hz'

@@ -26,6 +26,8 @@ class SynthesizeCommand extends Command
             ->addOption('volume', 'lvl',  InputOption::VALUE_OPTIONAL, 'Volume of speech', '0%')
             ->addOption('pitch', 'pit', InputOption::VALUE_OPTIONAL, 'Pitch of speech', '0Hz')
             ->addOption('output', 'out',  InputOption::VALUE_OPTIONAL, 'Output file name', null)
+            ->addOption('file', 'f', InputOption::VALUE_OPTIONAL, 'Input file name', null)
+            ->addOption('ssml', 's', InputOption::VALUE_OPTIONAL, 'SSML content', false)
         ;
     }
 
@@ -38,17 +40,36 @@ class SynthesizeCommand extends Command
         $rate = $input->getOption('rate');
         $volume = $input->getOption('volume');
         $output_file = $input->getOption('output') ?? 'output_' . time();
+        $file = $input->getOption('file');
+        $ssml = $input->getOption('ssml');
 
-        if (empty($text)) {
-            $output->writeln("Text is required");
+        if (empty($text) && !empty($file)) {
+            $output->writeln("Error: Text or file is required");
             return Command::FAILURE;
         }
 
+        if ($text && $file) {
+            $output->writeln("Error: Cannot use both text and file options");
+            return Command::FAILURE;
+        }
+
+        $content = $text;
+
+        if ($file) {
+            $content = file_get_contents($file);
+
+            if (empty($content)) {
+                $output->writeln("Error: File is empty");
+                return Command::FAILURE;
+            }
+        }
+
         $tts = new EdgeTTS();
-        $tts->synthesize($text, $voice, [
+        $tts->synthesize($content, $voice, [
             'rate' => $rate,
             'volume' => $volume,
-            'pitch' => $pitch
+            'pitch' => $pitch,
+            'inputType' => $ssml ? 'ssml' : 'auto'
         ]);
         $tts->toFile("{$output_file}");
         $output->writeln("Audio file generated: {$output_file}.mp3");

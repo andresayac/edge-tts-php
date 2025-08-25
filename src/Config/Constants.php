@@ -5,9 +5,9 @@ namespace Afaya\EdgeTTS\Config;
 class Constants
 {
     public const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-    public const BASE_URL = 'speech.platform.bing.com/consumer/speech/synthesize/readaloud';
-    public const WSS_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
-    public const VOICES_URL = 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list';
+    public const BASE_URL = 'https://api.msedgeservices.com/tts/cognitiveservices';
+    public const WSS_URL = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1';
+    public const VOICES_URL = 'https://api.msedgeservices.com/tts/cognitiveservices/voices/list';
 
 
     public const CHROMIUM_FULL_VERSION = '140.0.3485.14';

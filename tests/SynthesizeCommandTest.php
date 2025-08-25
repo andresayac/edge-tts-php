@@ -18,8 +18,6 @@ class SynthesizeCommandTest extends TestCase
             '--voice' => 'en-US-AriaNeural',
         ]);
 
-        var_dump($commandTester->getDisplay());
-
         $this->assertSame(0, $resultCode);
         $this->assertStringContainsString('Audio file generated:', $commandTester->getDisplay());
     }

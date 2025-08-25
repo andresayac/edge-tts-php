@@ -39,7 +39,7 @@ class EdgeTTS
         ]);
 
         $json = file_get_contents(
-            Constants::VOICES_URL . "?trustedclienttoken=" . Constants::TRUSTED_CLIENT_TOKEN . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN) . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION),
+            Constants::VOICES_URL . "?Ocp-Apim-Subscription-Key=" . Constants::TRUSTED_CLIENT_TOKEN . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN) . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION),
             false,
             $context
         );
@@ -86,29 +86,112 @@ class EdgeTTS
         return reset($matchedVoice)['ShortName'];
     }
 
-
-    private function getSSML(string $text, string $voice, array $options = []): string
+    public function detectSSML(string $content): array
     {
-        $options = array_merge([
+        $trimmedContent = trim($content);
+
+        $looksLikeSSML = preg_match('/^<\?xml|^<speak/i', $trimmedContent);
+
+        if (!$looksLikeSSML) {
+            return [
+                'isValid' => true,
+                'isSSML'  => false
+            ];
+        }
+
+        $errors = [];
+
+        $hasSpeakTag = preg_match('/<speak\b[^>]*>[\s\S]*<\/speak>/i', $trimmedContent);
+        $hasVoiceTag = preg_match('/<voice\b[^>]*>[\s\S]*<\/voice>/i', $trimmedContent);
+
+        if (!$hasSpeakTag) {
+            throw new \RuntimeException('Invalid SSML: Missing <speak> tag');
+        }
+
+        if (!$hasVoiceTag) {
+            throw new \RuntimeException('Invalid SSML: Missing <voice> tag');
+        }
+
+        $hasCorrectNamespace = preg_match('/xmlns="http:\/\/www\.w3\.org\/2001\/10\/synthesis"/i', $trimmedContent);
+        if (!$hasCorrectNamespace && $hasSpeakTag) {
+            throw new \RuntimeException('Invalid SSML: Missing or incorrect namespace declaration');
+        }
+
+        return [
+            'isValid' => empty($errors),
+            'isSSML'  => (bool)($hasSpeakTag || $hasVoiceTag),
+            'errors'  => !empty($errors) ? $errors : null
+        ];
+    }
+
+    public function escapeXML(string $text): string
+    {
+        return htmlspecialchars($text, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    }
+
+    private function getSSML(string $content, string $voice, array $options = []): string
+    {
+         $options = array_merge([
             'pitch' => '0Hz',
             'rate' => '0%',
             'volume' => '0%'
         ], $options);
 
         $options['pitch'] = str_replace('hz', 'Hz', $options['pitch']);
+        
+        $inputType = $options['inputType'] ?? 'auto';
+        $treatAsSSML = false;
 
-        $pitch = $this->validatePitch($options['pitch']);
-        $rate = $this->validateRate($options['rate']);
-        $volume = $this->validateVolume($options['volume']);
-        $voice = $this->checkVoice($voice);
+        if ($inputType === 'ssml') {
+            $treatAsSSML = true;
+        } else if ($inputType === 'text') {
+            $treatAsSSML = false;
+        } else {
+            $detection = $this->detectSSML($content);
+            $treatAsSSML = $detection['isSSML'];
 
-        return "<speak version='1.0' xml:lang='en-US'>
-                    <voice name='$voice'>
-                        <prosody pitch='$pitch' rate='$rate' volume='$volume'>
-                            $text
+            if ($detection['isSSML']) {
+                if (!$detection['isValid']) {
+                    error_log('⚠ SSML validation warnings: ' . json_encode($detection['errors']));
+                }
+            }
+        }
+
+        if ($treatAsSSML) {
+            $ssml = trim($content);
+            if (strpos($ssml, 'xmlns=') === false) {
+                $ssml = preg_replace(
+                    '/<speak([^>]*)>/i',
+                    '<speak$1 xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts">',
+                    $ssml
+                );
+            }
+
+            if (!preg_match('/<voice\b[^>]*>/i', $ssml) && $voice) {
+                $ssml = preg_replace(
+                    '/(<speak[^>]*>)([\s\S]*?)(<\/speak>)/i',
+                    '$1<voice name="' . $voice . '">$2</voice>$3',
+                    $ssml
+                );
+            }
+
+            return $ssml;
+        }
+
+        $pitch = $this->validatePitch($options['pitch'] ?? 0);
+        $rate = $this->validateRate($options['rate'] ?? 0);
+        $volume = $this->validateVolume($options['volume'] ?? 0);
+
+        $escapedText = $this->escapeXML($content);
+
+        return '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
+                    <voice name="' . $voice . '">
+                        <prosody pitch="' . $pitch . '" rate="' . $rate . '" volume="' . $volume . '">
+                            ' . $escapedText . '
                         </prosody>
                     </voice>
-                </speak>";
+                </speak>
+        ';
     }
 
     private function validatePitch(string $pitch): string
@@ -140,7 +223,7 @@ class EdgeTTS
      *
      * @param string $text The text to be synthesized.
      * @param string $voice The voice to use (default: 'en-US-AnaNeural').
-     * @param array $options Options for the synthesis (rate, volume, pitch).
+     * @param array $options Options for the synthesis (rate, volume, pitch, inputType).
      * @return void
      */
     public function synthesize(string $text, string $voice = 'en-US-AnaNeural', array $options = []): void
@@ -151,7 +234,7 @@ class EdgeTTS
         $req_id = Uuid::uuid4()->toString();
 
         $url = Constants::WSS_URL
-            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
+            . "?Ocp-Apim-Subscription-Key=" . Constants::TRUSTED_CLIENT_TOKEN
             . "&ConnectionId=" . $req_id
             . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN)
             . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
@@ -185,7 +268,7 @@ class EdgeTTS
 
 
         $url = Constants::WSS_URL
-            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
+            . "?Ocp-Apim-Subscription-Key=" . Constants::TRUSTED_CLIENT_TOKEN
             . "&ConnectionId="       . $reqId
             . "&Sec-MS-GEC="         . $secMsGEC
             . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
@@ -226,7 +309,7 @@ class EdgeTTS
                         }
                         return;
                     }
-                    
+
                     if (strpos($data, "Path:turn.end") !== false) {
                         $this->offset_compensation = $this->last_duration_offset + 8750000;
                         $ws->close();
