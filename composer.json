@@ -10,7 +10,7 @@
     },
     "require": {
         "php": ">=7.4",
-        "symfony/console": "^5.4",
+        "symfony/console": "^5.4|^6.0|^7.0",
         "ratchet/pawl": "^0.4.1",
         "ramsey/uuid": "^4.2",
         "react/event-loop": "^1.3"
