@@ -8,6 +8,8 @@ use Afaya\EdgeTTS\Config\Constants;
 use React\EventLoop\Loop;
 use InvalidArgumentException;
 use RuntimeException;
+use DateTime;
+use DateTimeZone;
 
 class EdgeTTS
 {
@@ -57,7 +59,7 @@ class EdgeTTS
         $keysToUnset = ['VoiceTag', 'SuggestedCodec', 'Status'];
 
         foreach ($data as $voice) {
-            $voice['FriendlyName'] = $voice['FriendlyName'] ?? $voice['LocalName'] ;
+            $voice['FriendlyName'] = $voice['FriendlyName'] ?? $voice['LocalName'];
             $voice['FriendlyName'] = "{$voice['FriendlyName']} ({$voice['VoiceType']}) - {$voice['LocaleName']}";
             $voices[] = array_diff_key($voice, array_flip($keysToUnset));
         }
@@ -74,7 +76,7 @@ class EdgeTTS
         ));
     }
 
-    private function checkVoice(string $voice): string
+    public function checkVoice(string $voice): string
     {
         $voices = $this->getVoices();
         $matchedVoice = array_filter($voices, function ($v) use ($voice) {
@@ -133,14 +135,14 @@ class EdgeTTS
 
     private function getSSML(string $content, string $voice, array $options = []): string
     {
-         $options = array_merge([
+        $options = array_merge([
             'pitch' => '0Hz',
             'rate' => '0%',
             'volume' => '0%'
         ], $options);
 
         $options['pitch'] = str_replace('hz', 'Hz', $options['pitch']);
-        
+
         $inputType = $options['inputType'] ?? 'auto';
         $treatAsSSML = false;
 
@@ -294,7 +296,7 @@ class EdgeTTS
                 $speechMsg =
                     "X-RequestId:{$reqId}\r\n" .
                     "Content-Type:application/ssml+xml\r\n" .
-                    "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+                    "X-Timestamp:" . $this->getXTime() . "\r\n" .
                     "Path:ssml\r\n\r\n" .
                     $SSML;
                 $ws->send($speechMsg);
@@ -360,7 +362,7 @@ class EdgeTTS
 
         $message = "X-RequestId:{$req_id}\r\n" .
             "Content-Type:application/ssml+xml\r\n" .
-            "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+            "X-Timestamp:" . $this->getXTime() . "\r\n" .
             "Path:ssml\r\n\r\n" .
             $SSML_text;
         $ws->send($message);
@@ -388,7 +390,7 @@ class EdgeTTS
             ]
         ];
 
-        return "X-Timestamp:" . $this->getXTime() . "Z\r\n" .
+        return "X-Timestamp:" . $this->getXTime() . "\r\n" .
             "Content-Type:application/json; charset=utf-8\r\n" .
             "Path:speech.config\r\n\r\n" .
             json_encode($config) . "\r\n";
@@ -425,19 +427,29 @@ class EdgeTTS
     /**
      * Generates a Sec-MS-GEC token.
      */
-    private function generateSecMsGec(string $trustedClientToken): string
+    private function generateSecMsGec(string $trustedClientToken, string $timeZone = 'UTC'): string
     {
-        $ticks = (int) floor(time() + 11644473600);
+        $date = new DateTime('now', new DateTimeZone($timeZone));
+        $timestamp = $date->getTimestamp();
+        $ticks = (int) floor($timestamp + 11644473600);
         $rounded = $ticks - ($ticks % 300);
         $windowsTicks = $rounded * 10000000;
         $data = (string) $windowsTicks . $trustedClientToken;
         return strtoupper(hash('sha256', $data));
     }
 
+    /**
+     * Returns the current time in the required format 
+     */
 
-    private function getXTime(): string
+    private function getXTime(string $timeZone = 'UTC'): string
     {
-        return (new \DateTime())->format('Y-m-d\TH:i:s.v\Z');
+        try {
+            $now = new DateTime('now', new DateTimeZone($timeZone));
+            return $now->format('D, M d, Y H:i:s T');
+        } catch (\Exception $e) {
+            throw new InvalidArgumentException("Invalid timezone: $timeZone");
+        }
     }
 
     /**

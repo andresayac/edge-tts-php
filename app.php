@@ -10,13 +10,19 @@ $tts = new EdgeTTS();
 
 // Get voices
 $voices = $tts->getVoices();  
+$tts->checkVoice('es-MX-DaliaMultilingualNeural'); // Validates if the voice exists
 // var_dump($voices);  // array -> use ShortName with the name of the voice
+// imprimir todas las voces unicamente la key 'ShortName'
+// foreach ($voices as $voice) {
+//     echo $voice['ShortName'] . PHP_EOL;
+// }
+
 
 $ssml = '<speak version="1.0"
        xmlns="http://www.w3.org/2001/10/synthesis"
        xmlns:mstts="https://www.w3.org/2001/mstts"
-       xml:lang="es-CO">
-  <voice name="es-CO-GonzaloNeural">
+       xml:lang="es-ES">
+  <voice name="es-MX-DaliaMultilingualNeural">
     <mstts:express-as style="narration-professional">
       <prosody rate="+5%" pitch="+10Hz" volume="+0%">
         Hola, este es un ejemplo de <emphasis>SSML</emphasis>.
@@ -29,7 +35,7 @@ $ssml = '<speak version="1.0"
   </voice>
 </speak>';
 
-$tts->synthesize($ssml, 'en-US-AriaNeural', [
+$tts->synthesize($ssml, 'es-MX-DaliaMultilingualNeural', [
     'rate' => '0%',
     'volume' => '0%',
     'pitch' => '0Hz'
