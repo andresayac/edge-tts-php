@@ -10,7 +10,7 @@ use Afaya\EdgeTTS\Commands\SynthesizeCommand;
 use Afaya\EdgeTTS\Commands\VoiceListCommand;
 
 
-$application = new Application('Edge TTS CLI', '1.4.2');
+$application = new Application('Edge TTS CLI', '1.4.3');
 $application->add(new SynthesizeCommand());
 $application->add(new VoiceListCommand());
 
