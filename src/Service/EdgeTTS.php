@@ -3,6 +3,7 @@
 namespace Afaya\EdgeTTS\Service;
 
 use Ratchet\Client\Connector;
+use React\Socket\Connector as SocketConnector;
 use Ramsey\Uuid\Uuid;
 use Afaya\EdgeTTS\Config\Constants;
 use React\EventLoop\Loop;
@@ -37,7 +38,11 @@ class EdgeTTS
                     Constants::BASE_HEADERS,
                     Constants::VOICE_HEADERS
                 ))
-            ]
+            ],
+            "ssl" => array(
+                "verify_peer" => false,
+                "verify_peer_name" => false,
+            ),
         ]);
 
         $json = file_get_contents(
@@ -233,7 +238,14 @@ class EdgeTTS
     public function synthesize(string $text, string $voice = 'en-US-AnaNeural', array $options = []): void
     {
         $loop = Loop::get();
-        $connector = new Connector($loop);
+
+        $socketConnector = new SocketConnector($loop, [
+            'tls' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+            ]
+        ]);
+        $connector = new Connector($loop, $socketConnector);
 
         $req_id = Uuid::uuid4()->toString();
 
@@ -265,7 +277,13 @@ class EdgeTTS
         $this->audio_stream = [];
 
         $loop = Loop::get();
-        $connector = new Connector($loop);
+        $socketConnector = new SocketConnector($loop, [
+            'tls' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+            ]
+        ]);
+        $connector = new Connector($loop, $socketConnector);
 
         $reqId     = Uuid::uuid4()->toString();
         $secMsGEC  = $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN);
