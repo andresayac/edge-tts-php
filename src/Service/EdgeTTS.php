@@ -24,7 +24,7 @@ class EdgeTTS
     public function __construct()
     {
         $this->headers = array_merge(
-            Constants::BASE_HEADERS,
+            Constants::getBaseHeaders(),
             Constants::WSS_HEADERS
         );
     }
@@ -35,7 +35,7 @@ class EdgeTTS
             'http' => [
                 'method' => 'GET',
                 'header' => $this->formatHeaders(array_merge(
-                    Constants::BASE_HEADERS,
+                    Constants::getBaseHeaders(),
                     Constants::VOICE_HEADERS
                 ))
             ],

@@ -9,17 +9,20 @@ class Constants
     public const WSS_URL = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1';
     public const VOICES_URL = 'https://api.msedgeservices.com/tts/cognitiveservices/voices/list';
 
-
-    public const CHROMIUM_FULL_VERSION = '140.0.3485.14';
-    public const CHROMIUM_MAJOR_VERSION = '140';
-    public const SEC_MS_GEC_VERSION = '1-140.0.3485.14';
     
+    public static function token32(): string {
+        $bytes = random_bytes(16);
+        return strtoupper(bin2hex($bytes));
+    }
 
-    public const BASE_HEADERS = [
-        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0',
-        'Accept-Encoding' => 'gzip, deflate, br, zstd',
-        'Accept-Language' => 'es,es-ES;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,es-CO;q=0.5,es-MX;q=0.4',
-    ];
+    public static function getBaseHeaders(): array {
+        return [
+            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0',
+            'Accept-Encoding' => 'gzip, deflate, br, zstd',
+            'Accept-Language' => 'es,es-ES;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,es-CO;q=0.5,es-MX;q=0.4',
+            'Cookie' => 'MUID=' . self::token32()
+        ];
+    }
     
     public const WSS_HEADERS = [
         'Pragma' => 'no-cache',
@@ -27,7 +30,7 @@ class Constants
         'Origin' => 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
         'Sec-WebSocket-Protocol' => 'synthesize',
         'Sec-WebSocket-Version' => '13',
-        'User-Agent' => self::BASE_HEADERS['User-Agent']
+        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0'
     ];
     
     public const VOICE_HEADERS = [
