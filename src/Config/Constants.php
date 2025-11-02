@@ -9,6 +9,9 @@ class Constants
     public const WSS_URL = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1';
     public const VOICES_URL = 'https://api.msedgeservices.com/tts/cognitiveservices/voices/list';
 
+    public const CHROMIUM_FULL_VERSION = '142.0.3595.0';
+    public const CHROMIUM_MAJOR_VERSION = '142';
+    public const SEC_MS_GEC_VERSION = '1-142.0.3595';
     
     public static function token32(): string {
         $bytes = random_bytes(16);
