@@ -16,6 +16,7 @@ class EdgeTTS
 {
     private array $audio_stream = [];
     private string $audio_format = 'mp3';
+    private string $output_format = 'audio-24khz-48kbitrate-mono-mp3';
     private array $headers;
     private array $word_boundaries = [];
     private int $offset_compensation = 0;
@@ -232,11 +233,14 @@ class EdgeTTS
      *
      * @param string $text The text to be synthesized.
      * @param string $voice The voice to use (default: 'en-US-AnaNeural').
-     * @param array $options Options for the synthesis (rate, volume, pitch, inputType).
+     * @param array $options Options for the synthesis (rate, volume, pitch, inputType, outputFormat).
      * @return void
      */
     public function synthesize(string $text, string $voice = 'en-US-AnaNeural', array $options = []): void
     {
+        $this->output_format = $options['outputFormat'] ?? 'audio-24khz-48kbitrate-mono-mp3';
+        $this->audio_format = $this->getFileExtension($this->output_format);
+        
         $loop = Loop::get();
 
         $socketConnector = new SocketConnector($loop, [
@@ -275,6 +279,8 @@ class EdgeTTS
     public function synthesizeStream(string $text, string $voice = 'en-US-AnaNeural', array $options = [], ?callable $onChunk = null): void
     {
         $this->audio_stream = [];
+        $this->output_format = $options['outputFormat'] ?? 'audio-24khz-48kbitrate-mono-mp3';
+        $this->audio_format = $this->getFileExtension($this->output_format);
 
         $loop = Loop::get();
         $socketConnector = new SocketConnector($loop, [
@@ -402,7 +408,7 @@ class EdgeTTS
                             'sentenceBoundaryEnabled' => false,
                             'wordBoundaryEnabled' => true
                         ],
-                        'outputFormat' => 'audio-24khz-48kbitrate-mono-mp3'
+                        'outputFormat' => $this->output_format
                     ]
                 ]
             ]
@@ -475,7 +481,7 @@ class EdgeTTS
      */
     private function parseBitrateKbpsFromFormat(?string $format = null): ?int
     {
-        $format = $format ?? $this->audio_format;
+        $format = $format ?? $this->output_format;
         if (preg_match('/-(\d+)kbitrate-/', $format, $m)) {
             return (int) $m[1];
         }
@@ -609,5 +615,26 @@ class EdgeTTS
     public function getWordBoundaries(): array
     {
         return $this->word_boundaries;
+    }
+
+    /**
+     * Determines the file extension based on the output format.
+     * 
+     * @param string $format The audio output format
+     * @return string The corresponding file extension
+     */
+    private function getFileExtension(string $format): string
+    {
+        if (strpos($format, 'mp3') !== false) return 'mp3';
+        if (strpos($format, 'opus') !== false && strpos($format, 'webm') !== false) return 'webm';
+        if (strpos($format, 'opus') !== false && strpos($format, 'ogg') !== false) return 'ogg';
+        if (strpos($format, 'wav') !== false || strpos($format, 'riff') !== false) return 'wav';
+        if (strpos($format, 'pcm') !== false && strpos($format, 'raw') !== false) return 'pcm';
+        if (strpos($format, 'alaw') !== false) return 'alaw';
+        if (strpos($format, 'mulaw') !== false) return 'mulaw';
+        if (strpos($format, 'truesilk') !== false) return 'silk';
+        if (strpos($format, 'g722') !== false) return 'g722';
+        if (strpos($format, 'amr') !== false) return 'amr';
+        return 'audio';
     }
 }

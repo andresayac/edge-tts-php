@@ -204,11 +204,92 @@ $voices = $tts->getVoices();
 
 ## Audio Configuration
 
+### Default Settings
 The package uses high-quality audio settings by default:
 - **Format**: MP3 (audio-24khz-48kbitrate-mono-mp3)
 - **Sample Rate**: 24kHz
 - **Bitrate**: 48kbps
 - **Channels**: Mono
+
+### Custom Output Format
+
+You can customize the audio output format using the `outputFormat` option. The package supports all formats provided by Microsoft Azure Speech Service:
+
+```php
+use Afaya\EdgeTTS\Service\EdgeTTS;
+use Afaya\EdgeTTS\Config\Constants;
+
+$tts = new EdgeTTS();
+
+// Use a custom output format
+$tts->synthesize("Hello, world!", 'en-US-AriaNeural', [
+    'outputFormat' => 'audio-48khz-192kbitrate-mono-mp3',
+    'rate' => '0%',
+    'pitch' => '0Hz'
+]);
+
+$tts->toFile("output"); // Will save as output.mp3
+```
+
+### Available Output Formats
+
+The package supports **36 different audio formats** through `Constants::OUTPUT_FORMAT`:
+
+#### Streaming Formats (MP3)
+- `audio-16khz-32kbitrate-mono-mp3`
+- `audio-16khz-64kbitrate-mono-mp3`
+- `audio-16khz-128kbitrate-mono-mp3`
+- `audio-24khz-48kbitrate-mono-mp3` (default)
+- `audio-24khz-96kbitrate-mono-mp3`
+- `audio-24khz-160kbitrate-mono-mp3`
+- `audio-48khz-96kbitrate-mono-mp3`
+- `audio-48khz-192kbitrate-mono-mp3`
+
+#### Opus Formats
+- `audio-16khz-16bit-32kbps-mono-opus`
+- `audio-24khz-16bit-24kbps-mono-opus`
+- `audio-24khz-16bit-48kbps-mono-opus`
+- `ogg-16khz-16bit-mono-opus`
+- `ogg-24khz-16bit-mono-opus`
+- `ogg-48khz-16bit-mono-opus`
+- `webm-16khz-16bit-mono-opus`
+- `webm-24khz-16bit-24kbps-mono-opus`
+- `webm-24khz-16bit-mono-opus`
+
+#### Raw PCM Formats
+- `raw-8khz-8bit-mono-alaw`
+- `raw-8khz-8bit-mono-mulaw`
+- `raw-8khz-16bit-mono-pcm`
+- `raw-16khz-16bit-mono-pcm`
+- `raw-16khz-16bit-mono-truesilk`
+- `raw-22050hz-16bit-mono-pcm`
+- `raw-24khz-16bit-mono-pcm`
+- `raw-24khz-16bit-mono-truesilk`
+- `raw-44100hz-16bit-mono-pcm`
+- `raw-48khz-16bit-mono-pcm`
+
+#### WAV/RIFF Formats (Non-Streaming)
+- `riff-8khz-8bit-mono-alaw`
+- `riff-8khz-8bit-mono-mulaw`
+- `riff-8khz-16bit-mono-pcm`
+- `riff-22050hz-16bit-mono-pcm`
+- `riff-24khz-16bit-mono-pcm`
+- `riff-44100hz-16bit-mono-pcm`
+- `riff-48khz-16bit-mono-pcm`
+
+#### Other Formats
+- `amr-wb-16000hz`
+- `g722-16khz-64kbps`
+
+### Testing Output Formats
+
+You can test all available formats using the included test script:
+
+```bash
+php test-formats.php
+```
+
+This will test all 36 formats and provide a detailed report showing which formats are compatible with the Edge TTS service.
 
 ## Error Handling
 
