@@ -27,7 +27,6 @@ class SynthesizeCommand extends Command
             ->addOption('pitch', 'pit', InputOption::VALUE_OPTIONAL, 'Pitch of speech', '0Hz')
             ->addOption('output', 'out',  InputOption::VALUE_OPTIONAL, 'Output file name', null)
             ->addOption('file', 'f', InputOption::VALUE_OPTIONAL, 'Input file name', null)
-            ->addOption('ssml', 's', InputOption::VALUE_OPTIONAL, 'SSML content', false)
         ;
     }
 
@@ -41,7 +40,6 @@ class SynthesizeCommand extends Command
         $volume = $input->getOption('volume');
         $output_file = $input->getOption('output') ?? 'output_' . time();
         $file = $input->getOption('file');
-        $ssml = $input->getOption('ssml');
 
         if (empty($text) && !empty($file)) {
             $output->writeln("Error: Text or file is required");
@@ -68,8 +66,7 @@ class SynthesizeCommand extends Command
         $tts->synthesize($content, $voice, [
             'rate' => $rate,
             'volume' => $volume,
-            'pitch' => $pitch,
-            'inputType' => $ssml ? 'ssml' : 'auto'
+            'pitch' => $pitch
         ]);
         $tts->toFile("{$output_file}");
         $output->writeln("Audio file generated: {$output_file}.mp3");

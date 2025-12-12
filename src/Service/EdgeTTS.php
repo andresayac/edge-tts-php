@@ -30,6 +30,59 @@ class EdgeTTS
         );
     }
 
+    private function normalizeVoices(array $data): array
+    {
+        $out = [];
+
+        foreach ($data as $v) {
+            $short  = $v['ShortName'] ?? '';
+            $locale = $v['Locale'] ?? '';
+
+            $base = preg_replace('/^[a-z]{2}-[A-Z]{2}-/', '', $short);
+            $base = preg_replace('/NeuralHD$/', '', $base);
+            $base = preg_replace('/Neural$/', '', $base);
+            $base = trim($base);
+
+            $voiceType = $v['VoiceType']
+                ?? (stripos(($v['Name'] ?? '') . ' ' . $short, 'NeuralHD') !== false ? 'NeuralHD' : 'Neural');
+
+            $localeName = $v['LocaleName'] ?? ($locale ?: null);
+
+            $display = $v['DisplayName'] ?? ($v['FriendlyName'] ?? ($base ?: $short));
+            $display = preg_replace('/^Microsoft\s+/i', '', $display);
+            $display = trim(explode(' - ', $display)[0]);
+
+            // ✅ quitar "Online (Natural)" y variantes
+            $display = preg_replace('/\s*Online\s*\(Natural\)\s*/i', ' ', $display);
+            $display = preg_replace('/\s*Online\s*/i', ' ', $display);
+            $display = trim(preg_replace('/\s+/', ' ', $display));
+
+            $tag = (isset($v['VoiceTag']) && is_array($v['VoiceTag'])) ? $v['VoiceTag'] : [];
+            $tailored = $tag['TailoredScenarios'] ?? $tag['ContentCategories'] ?? [];
+            $personalities = $tag['VoicePersonalities'] ?? [];
+
+            $out[] = [
+                'Name' => $short ?: ($v['Name'] ?? ''),
+                'OriginalName' => $v['Name'] ?? '',
+                'DisplayName' => $display,
+                'LocalName' => $display,
+                'ShortName' => $short ?: ($v['Name'] ?? ''),
+                'Gender' => $v['Gender'] ?? null,
+                'Locale' => $locale ?: null,
+                'LocaleName' => $localeName,
+                'SecondaryLocaleList' => $v['SecondaryLocaleList'] ?? [],
+                'VoiceType' => $voiceType,
+                'VoiceTag' => [
+                    'TailoredScenarios' => is_array($tailored) ? $tailored : [],
+                    'VoicePersonalities' => is_array($personalities) ? $personalities : [],
+                ],
+                'FriendlyName' => "{$display} ({$voiceType}) - {$localeName}",
+            ];
+        }
+
+        return $out;
+    }
+
     public function getVoices(): array
     {
         $context = stream_context_create([
@@ -47,7 +100,7 @@ class EdgeTTS
         ]);
 
         $json = file_get_contents(
-            Constants::VOICES_URL . "?Ocp-Apim-Subscription-Key=" . Constants::TRUSTED_CLIENT_TOKEN . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN) . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION),
+            Constants::VOICES_URL . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN) . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION),
             false,
             $context
         );
@@ -62,13 +115,8 @@ class EdgeTTS
         }
 
         $voices = [];
-        $keysToUnset = ['VoiceTag', 'SuggestedCodec', 'Status'];
 
-        foreach ($data as $voice) {
-            $voice['FriendlyName'] = $voice['FriendlyName'] ?? $voice['LocalName'];
-            $voice['FriendlyName'] = "{$voice['FriendlyName']} ({$voice['VoiceType']}) - {$voice['LocaleName']}";
-            $voices[] = array_diff_key($voice, array_flip($keysToUnset));
-        }
+        $voices = $this->normalizeVoices($data);
 
         return $voices;
     }
@@ -96,43 +144,6 @@ class EdgeTTS
         return reset($matchedVoice)['ShortName'];
     }
 
-    public function detectSSML(string $content): array
-    {
-        $trimmedContent = trim($content);
-
-        $looksLikeSSML = preg_match('/^<\?xml|^<speak/i', $trimmedContent);
-
-        if (!$looksLikeSSML) {
-            return [
-                'isValid' => true,
-                'isSSML'  => false
-            ];
-        }
-
-        $errors = [];
-
-        $hasSpeakTag = preg_match('/<speak\b[^>]*>[\s\S]*<\/speak>/i', $trimmedContent);
-        $hasVoiceTag = preg_match('/<voice\b[^>]*>[\s\S]*<\/voice>/i', $trimmedContent);
-
-        if (!$hasSpeakTag) {
-            throw new \RuntimeException('Invalid SSML: Missing <speak> tag');
-        }
-
-        if (!$hasVoiceTag) {
-            throw new \RuntimeException('Invalid SSML: Missing <voice> tag');
-        }
-
-        $hasCorrectNamespace = preg_match('/xmlns="http:\/\/www\.w3\.org\/2001\/10\/synthesis"/i', $trimmedContent);
-        if (!$hasCorrectNamespace && $hasSpeakTag) {
-            throw new \RuntimeException('Invalid SSML: Missing or incorrect namespace declaration');
-        }
-
-        return [
-            'isValid' => empty($errors),
-            'isSSML'  => (bool)($hasSpeakTag || $hasVoiceTag),
-            'errors'  => !empty($errors) ? $errors : null
-        ];
-    }
 
     public function escapeXML(string $text): string
     {
@@ -142,51 +153,12 @@ class EdgeTTS
     private function getSSML(string $content, string $voice, array $options = []): string
     {
         $options = array_merge([
-            'pitch' => '0Hz',
+            'pitch' => '+0Hz',
             'rate' => '0%',
             'volume' => '0%'
         ], $options);
 
         $options['pitch'] = str_replace('hz', 'Hz', $options['pitch']);
-
-        $inputType = $options['inputType'] ?? 'auto';
-        $treatAsSSML = false;
-
-        if ($inputType === 'ssml') {
-            $treatAsSSML = true;
-        } else if ($inputType === 'text') {
-            $treatAsSSML = false;
-        } else {
-            $detection = $this->detectSSML($content);
-            $treatAsSSML = $detection['isSSML'];
-
-            if ($detection['isSSML']) {
-                if (!$detection['isValid']) {
-                    error_log('⚠ SSML validation warnings: ' . json_encode($detection['errors']));
-                }
-            }
-        }
-
-        if ($treatAsSSML) {
-            $ssml = trim($content);
-            if (strpos($ssml, 'xmlns=') === false) {
-                $ssml = preg_replace(
-                    '/<speak([^>]*)>/i',
-                    '<speak$1 xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts">',
-                    $ssml
-                );
-            }
-
-            if (!preg_match('/<voice\b[^>]*>/i', $ssml) && $voice) {
-                $ssml = preg_replace(
-                    '/(<speak[^>]*>)([\s\S]*?)(<\/speak>)/i',
-                    '$1<voice name="' . $voice . '">$2</voice>$3',
-                    $ssml
-                );
-            }
-
-            return $ssml;
-        }
 
         $pitch = $this->validatePitch($options['pitch'] ?? 0);
         $rate = $this->validateRate($options['rate'] ?? 0);
@@ -206,24 +178,24 @@ class EdgeTTS
 
     private function validatePitch(string $pitch): string
     {
-        if (!preg_match('/^-?\d{1,3}Hz$/', $pitch) || intval($pitch) < -100 || intval($pitch) > 100) {
-            throw new InvalidArgumentException("Invalid pitch format. Expected format: '-100Hz to 100Hz'.");
+        if (!preg_match('/^[+-]?\d{1,3}Hz$/', $pitch) || intval($pitch) < -100 || intval($pitch) > 100) {
+            throw new InvalidArgumentException("Invalid pitch format. Expected format: '-100Hz to +100Hz'.");
         }
         return $pitch;
     }
 
     private function validateRate(string $rate): string
     {
-        if (!preg_match('/^-?\d{1,3}%$/', $rate) || intval($rate) < -100 || intval($rate) > 100) {
-            throw new InvalidArgumentException("Invalid rate format. Expected format: '-100% to 100%'.");
+        if (!preg_match('/^[+-]?\d{1,3}%$/', $rate) || intval($rate) < -100 || intval($rate) > 100) {
+            throw new InvalidArgumentException("Invalid rate format. Expected format: '-100% to +100%'.");
         }
         return $rate;
     }
 
     private function validateVolume(string $volume): string
     {
-        if (!preg_match('/^-?\d{1,3}%$/', $volume) || intval($volume) < -100 || intval($volume) > 100) {
-            throw new InvalidArgumentException("Invalid volume format. Expected format: '-100% to 100%'.");
+        if (!preg_match('/^[+-]?\d{1,3}%$/', $volume) || intval($volume) < -100 || intval($volume) > 100) {
+            throw new InvalidArgumentException("Invalid volume format. Expected format: '-100% to +100%'.");
         }
         return $volume;
     }
@@ -238,9 +210,14 @@ class EdgeTTS
      */
     public function synthesize(string $text, string $voice = 'en-US-AnaNeural', array $options = []): void
     {
+
+        if (isset($options['outputFormat']) && !in_array($options['outputFormat'], Constants::OUTPUT_FORMAT)) {
+            throw new InvalidArgumentException("Invalid output format. Use one of: " . implode(', ', Constants::OUTPUT_FORMAT));
+        }
+
         $this->output_format = $options['outputFormat'] ?? 'audio-24khz-48kbitrate-mono-mp3';
         $this->audio_format = $this->getFileExtension($this->output_format);
-        
+
         $loop = Loop::get();
 
         $socketConnector = new SocketConnector($loop, [
@@ -254,7 +231,7 @@ class EdgeTTS
         $req_id = Uuid::uuid4()->toString();
 
         $url = Constants::WSS_URL
-            . "?Ocp-Apim-Subscription-Key=" . Constants::TRUSTED_CLIENT_TOKEN
+            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
             . "&ConnectionId=" . $req_id
             . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN)
             . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
@@ -278,6 +255,10 @@ class EdgeTTS
 
     public function synthesizeStream(string $text, string $voice = 'en-US-AnaNeural', array $options = [], ?callable $onChunk = null): void
     {
+        if (isset($options['outputFormat']) && !in_array($options['outputFormat'], Constants::OUTPUT_FORMAT)) {
+            throw new InvalidArgumentException("Invalid output format. Use one of: " . implode(', ', Constants::OUTPUT_FORMAT));
+        }
+
         $this->audio_stream = [];
         $this->output_format = $options['outputFormat'] ?? 'audio-24khz-48kbitrate-mono-mp3';
         $this->audio_format = $this->getFileExtension($this->output_format);
@@ -296,7 +277,7 @@ class EdgeTTS
 
 
         $url = Constants::WSS_URL
-            . "?Ocp-Apim-Subscription-Key=" . Constants::TRUSTED_CLIENT_TOKEN
+            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
             . "&ConnectionId="       . $reqId
             . "&Sec-MS-GEC="         . $secMsGEC
             . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
@@ -314,7 +295,6 @@ class EdgeTTS
         ]))->then(
             function ($socket) use ($SSML, $reqId, $loop, $timeout, $onChunk, &$ws) {
                 $ws = $socket;
-
                 $ws->send($this->buildTTSConfigMessage());
 
                 $speechMsg =
@@ -405,8 +385,8 @@ class EdgeTTS
                 'synthesis' => [
                     'audio' => [
                         'metadataoptions' => [
-                            'sentenceBoundaryEnabled' => false,
-                            'wordBoundaryEnabled' => true
+                            'sentenceBoundaryEnabled' => "false",
+                            'wordBoundaryEnabled' => "true"
                         ],
                         'outputFormat' => $this->output_format
                     ]

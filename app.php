@@ -9,8 +9,9 @@ use Afaya\EdgeTTS\Service\EdgeTTS;
 $tts = new EdgeTTS();
 
 // Get voices
-$voices = $tts->getVoices();  
-$tts->checkVoice('es-MX-DaliaMultilingualNeural'); // Validates if the voice exists
+$voices = $tts->getVoices();
+
+$tts->checkVoice('af-ZA-WillemNeural'); // Validates if the voice exists
 // var_dump($voices);  // array -> use ShortName with the name of the voice
 // imprimir todas las voces unicamente la key 'ShortName'
 // foreach ($voices as $voice) {
@@ -18,51 +19,36 @@ $tts->checkVoice('es-MX-DaliaMultilingualNeural'); // Validates if the voice exi
 // }
 
 
-$ssml = '<speak version="1.0"
-       xmlns="http://www.w3.org/2001/10/synthesis"
-       xmlns:mstts="https://www.w3.org/2001/mstts"
-       xml:lang="es-ES">
-  <voice name="es-MX-DaliaMultilingualNeural">
-    <mstts:express-as style="narration-professional">
-      <prosody rate="+5%" pitch="+10Hz" volume="+0%">
-        Hola, este es un ejemplo de <emphasis>SSML</emphasis>.
-        <break time="400ms" />
-        El número es <say-as interpret-as="cardinal">2025</say-as>.
-        La palabra se pronuncia
-        <phoneme alphabet="ipa" ph="ˈxola">hola</phoneme>.
-      </prosody>
-    </mstts:express-as>
-  </voice>
-</speak>';
+$text = 'Hola mi nombre es Ximena y estoy utilizando el servicio de texto a voz de Microsoft Edge TTS. ¡Es genial poder convertir texto en audio de alta calidad!';
 
-$tts->synthesize($ssml, 'es-MX-DaliaMultilingualNeural', [
-    'rate' => '0%',
-    'volume' => '0%',
-    'pitch' => '0Hz'
+$tts->synthesize($text, 'en-US-AndrewMultilingualNeural', [
+    'rate' => '+0%',
+    'volume' => '+0%',
+    'pitch' => '+0Hz',
+    'outputFormat' => 'audio-24khz-48kbitrate-mono-mp3'
 ]);
 
-// Example export methods for the audio
-$tts->toBase64();
+// // Example export methods for the audio
+// $tts->toBase64();
 $tts->toFile("output");
-$tts->toStream();
+// $tts->toStream();
 $tts->saveMetadata("metadata.json");
-$tts->toRaw();
+// $tts->toRaw();
 
-// Get audio info
+// // Get audio info
 var_dump($tts->getAudioInfo());
-// Get duration in seconds
-var_dump($tts->getDuration());
+// // Get duration in seconds
+// var_dump($tts->getDuration());
 
-// Get size in bytes
-var_dump($tts->getSizeBytes());
+// // Get size in bytes
+// var_dump($tts->getSizeBytes());
 
-// Get audio stream
+// // Get audio stream
 $tts->synthesizeStream(
-    "Hello world from streaming TTS",
-    'en-US-AnaNeural',
-    [],
-    function (string $chunk) {
-        file_put_contents('out.mp3', $chunk, FILE_APPEND);
-    }
+  "Hello world from streaming TTS",
+  'en-US-JennyNeural',
+  [],
+  function (string $chunk) {
+    file_put_contents('out.mp3', $chunk, FILE_APPEND);
+  }
 );
-
