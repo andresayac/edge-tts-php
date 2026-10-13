@@ -32,8 +32,9 @@ class FakeEdgeTTS extends EdgeTTS
     /** @var array<int, array{url: string, headers: array}> */
     public array $voiceRequests = [];
 
-    public function __construct(?array $frames = null)
+    public function __construct(?array $frames = null, array $options = [])
     {
+        parent::__construct($options);
         $this->frames = $frames ?? self::session()['frames'];
     }
 
@@ -74,7 +75,7 @@ class FakeEdgeTTS extends EdgeTTS
         return $head . $payload;
     }
 
-    protected function connect(string $url, array $headers): WebSocket
+    protected function connect(string $url, array $headers, float $timeout): WebSocket
     {
         if ($this->accept !== null) {
             $refusal = ($this->accept)($url);
@@ -97,8 +98,8 @@ class FakeEdgeTTS extends EdgeTTS
 
         // A file, so what the client sent outlives the stream it closes.
         $sent = tempnam(sys_get_temp_dir(), 'edge-tts-');
-        $this->connections[] = ['url' => $url, 'headers' => $headers, 'sent' => $sent];
-        return new WebSocket($server, fopen($sent, 'w+b'));
+        $this->connections[] = ['url' => $url, 'headers' => $headers, 'timeout' => $timeout, 'sent' => $sent];
+        return new WebSocket($server, fopen($sent, 'w+b'), $timeout);
     }
 
     /**

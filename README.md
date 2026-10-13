@@ -16,9 +16,11 @@ The same library for the Edge text-to-speech service, in Node.js, PHP and Go:
 
 - **Text-to-speech** with more than 300 neural voices in over 100 locales.
 - **Streaming**: get the audio as it arrives, with a `foreach` or a callback.
-- **Word boundaries**: know when each word is spoken.
-- **Voice filtering** by language and gender.
+- **Word and sentence boundaries**: know when each word and sentence is spoken.
+- **Subtitles**: SRT or WebVTT, one cue per sentence.
+- **Voice filtering** by language and gender, with the list cached for 10 minutes.
 - **Pitch, rate and volume** control.
+- **Configurable**: override the endpoint, headers and timeout without waiting for a release.
 - **No event loop**: it works inside Laravel, Symfony, WordPress or a plain script.
 - **Verified TLS**, on Windows too, without configuring a CA bundle.
 - **Command-line tool** included.
@@ -55,26 +57,49 @@ echo $tts->toFile('hello'); // hello.mp3, the extension comes from the format
 # Synthesize text to hello.mp3
 php vendor/bin/edge-tts synthesize --text "Hello, world!" -o hello
 
-# Read the text from a file, with another voice and prosody
-php vendor/bin/edge-tts synthesize -f story.txt --voice es-CO-SalomeNeural -r +10% -p -5Hz -o story
+# Read the text from a file, with another voice and prosody, and write subtitles too
+php vendor/bin/edge-tts synthesize -f story.txt --voice es-CO-SalomeNeural -r +10% -p -5Hz -o story --subtitles story.srt
 
-# List the voices
+# Read from stdin, WebM/Opus output, WebVTT subtitles
+cat story.txt | php vendor/bin/edge-tts synthesize --file=- --format webm-24khz-16bit-mono-opus -o story --subtitles story.vtt
+
+# List the voices, optionally filtered
 php vendor/bin/edge-tts voice-list
+php vendor/bin/edge-tts voice-list --locale es-CO --gender female
 ```
 
 | Option | Description | Default |
 | --- | --- | --- |
 | `-t, --text` | Text to convert to audio | |
-| `-f, --file` | Input file (text) | |
+| `-f, --file` | Input file (text); `--file=-` reads from stdin | |
 | `--voice` | Voice to use | `en-US-AriaNeural` |
 | `-r, --rate` | Rate of speech | `0%` |
 | `-l, --volume` | Volume of speech | `0%` |
 | `-p, --pitch` | Pitch of speech | `0Hz` |
-| `-o, --output` | Output file name, without extension | `output_<timestamp>` |
+| `-o, --output` | Output file name; the extension is added when missing | `output_<timestamp>` |
+| `--format` | Output format | `audio-24khz-48kbitrate-mono-mp3` |
+| `--subtitles` | Write subtitles: `.srt`, or `.vtt` for WebVTT | |
 
 `edge-tts:synthesize` and `edge-tts:voice-list` still work as names of the commands.
 
 ## API
+
+### Configuration
+
+Every option is optional. The defaults come from `Constants`, so when Microsoft changes the service you can set the new values yourself instead of waiting for a release.
+
+```php
+$tts = new EdgeTTS([
+    'wssUrl'          => 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1',
+    'voicesUrl'       => 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list',
+    'secMsGecVersion' => '1-155.0.4283.45',
+    'headers'         => ['User-Agent' => '...'], // added to the default headers
+    'timeout'         => 30,                      // seconds without data before giving up
+    'voicesCacheTtl'  => 600,                     // seconds to reuse the voice list, 0 to always fetch it
+]);
+```
+
+A misspelled option throws `InvalidArgumentException`.
 
 ### Voices
 
@@ -102,6 +127,7 @@ $tts->synthesize('Hello, world!', 'en-US-AriaNeural', [
     'volume'       => '-10%',  // -100% to +100%
     'pitch'        => '+20Hz', // -100Hz to +100Hz
     'outputFormat' => Constants::OUTPUT_FORMAT['AUDIO_24KHZ_96KBITRATE_MONO_MP3'],
+    'timeout'      => 60,      // seconds, for this call only
 ]);
 ```
 
@@ -152,6 +178,24 @@ $tts->synthesizeStream('Long text to stream...', 'en-US-AriaNeural', [], functio
 });
 ```
 
+### Everything in one result
+
+`generate()` returns the audio, the boundaries and the duration in a `SynthesisResult`, and leaves the instance as it was:
+
+```php
+$result = $tts->generate('¿Cómo estás? ¡Qué bien!', 'es-CO-SalomeNeural');
+
+$result->audio;              // binary string
+$result->format;             // 'mp3'
+$result->outputFormat;       // 'audio-24khz-48kbitrate-mono-mp3'
+$result->wordBoundaries;
+$result->sentenceBoundaries;
+$result->duration;           // estimated, in seconds
+
+$result->toFile('greeting'); // greeting.mp3
+$result->toSRT();            // or toVTT()
+```
+
 ### Getting the audio
 
 After `synthesize()`, `stream()` or `synthesizeStream()`:
@@ -160,6 +204,7 @@ After `synthesize()`, `stream()` or `synthesizeStream()`:
 $raw    = $tts->toRaw();            // binary string
 $base64 = $tts->toBase64();         // base64 string
 $path   = $tts->toFile('out/audio'); // out/audio.mp3
+$path   = $tts->toFile('out/audio.mp3'); // out/audio.mp3, the extension is not repeated
 $path   = $tts->toFile('out/audio', 'bin'); // out/audio.bin
 $stream = $tts->toStream();         // php://memory resource
 
@@ -168,7 +213,7 @@ $seconds = $tts->getDuration();     // estimated from the size and bitrate
 $bytes = $tts->getSizeBytes();
 ```
 
-### Word boundaries
+### Word and sentence boundaries
 
 ```php
 foreach ($tts->getWordBoundaries() as $word) {
@@ -176,7 +221,31 @@ foreach ($tts->getWordBoundaries() as $word) {
     printf("%.2fs %s\n", $word['offset'] / 1e7, $word['text']);
 }
 
+$tts->getSentenceBoundaries(); // the same, one per sentence
 $tts->saveMetadata('words.json');
+```
+
+The service leaves the opening punctuation out of its sentences, so "¿Cómo estás?" comes back as "Cómo estás?". The library puts it back from your text: ¿ ¡ « " ' “ ‘ ( [.
+
+### Subtitles
+
+```php
+file_put_contents('speech.srt', $tts->toSRT()); // one cue per sentence
+file_put_contents('speech.vtt', $tts->toVTT());
+
+use Afaya\EdgeTTS\Service\Subtitles;
+
+Subtitles::toSRT($tts->getWordBoundaries());    // one cue per word
+```
+
+```
+1
+00:00:00,050 --> 00:00:01,600
+¿Cómo estás?
+
+2
+00:00:01,600 --> 00:00:02,950
+¡Qué bien!
 ```
 
 ### Errors
@@ -193,25 +262,15 @@ Every exception of the service extends `EdgeTTSException`, which extends `Runtim
 
 A machine whose clock is off by more than a few minutes is refused by the service. The client then corrects its clock from the response and tries once more.
 
-## Upgrading from 1.7 to 1.8
+## Upgrading
 
-1.7 stopped working when the service moved to a new endpoint. This version uses the new one, and also:
-
-- **Throws exceptions** when the synthesis fails, instead of printing the error and leaving no audio. They carry the reason the service gives, such as an unsupported voice or output format.
-- **No longer needs ReactPHP**, Ratchet or ramsey/uuid, so it no longer runs a global event loop.
-- **Works with `allow_url_fopen` off**, as on most shared hosting; the voice list needed it.
-- **Keeps the audio in one string**, so reading it back costs no copy: two hours of audio fit in the default 128 MB memory limit.
-- **Verifies TLS** certificates.
-- **Starts from scratch on every synthesis**: the audio and the word boundaries of the previous one used to pile up.
-- **Estimates the duration** from the bitrate of the format.
-- **Accepts numbers** for pitch, rate and volume, and any output format.
-- **Adds** `stream()`, `getVoicesByLanguage()` and `getVoicesByGender()`; `toFile()` returns the path it wrote.
-- **Fixes the CLI**: it runs with Symfony Console 5.4 to 8, from `vendor/bin`, and has the `synthesize` and `voice-list` names of the Node CLI.
+Version 1.7 stopped working when Microsoft moved the service to a new endpoint; 1.8.3 and later use the new one. What changed in each version, and what to look at when upgrading, is in the [CHANGELOG](CHANGELOG.md).
 
 ## Examples
 
 - [`examples/basic.php`](examples/basic.php): synthesize to a file and list voices.
 - [`examples/stream.php`](examples/stream.php): stream the audio with a generator and with a callback.
+- [`examples/subtitles.php`](examples/subtitles.php): generate the audio and its subtitles in one call.
 
 ## Testing
 

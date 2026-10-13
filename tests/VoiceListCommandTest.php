@@ -20,6 +20,20 @@ class VoiceListCommandTest extends TestCase
         $this->assertSame("Available voices:\n - en-US-AriaNeural\n - es-CO-SalomeNeural\n", str_replace(PHP_EOL, "\n", $tester->getDisplay()));
     }
 
+    public function testFiltersByLocaleAndGender(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $tts->voiceResponse = [200, [], '[
+            {"ShortName":"en-US-AriaNeural","Locale":"en-US","Gender":"Female"},
+            {"ShortName":"es-CO-SalomeNeural","Locale":"es-CO","Gender":"Female"},
+            {"ShortName":"es-CO-GonzaloNeural","Locale":"es-CO","Gender":"Male"}
+        ]'];
+        $tester = new CommandTester(new VoiceListCommand($tts));
+
+        $tester->execute(['--locale' => 'ES', '--gender' => 'female']);
+        $this->assertSame("Available voices:\n - es-CO-SalomeNeural\n", str_replace(PHP_EOL, "\n", $tester->getDisplay()));
+    }
+
     public function testReportsAFailedRequest(): void
     {
         $tts = new FakeEdgeTTS();

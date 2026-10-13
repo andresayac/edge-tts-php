@@ -293,6 +293,91 @@ class EdgeTTSTest extends TestCase
         $this->assertSame($tts->getWordBoundaries(), $saved);
     }
 
+    private const SRT = "1\n00:00:00,050 --> 00:00:02,013\nHello, world.\n\n"
+        . "2\n00:00:02,013 --> 00:00:03,913\nIs this a test?\n\n"
+        . "3\n00:00:03,913 --> 00:00:05,400\nYes!\n";
+
+    public function testCollectsTheSentenceBoundariesAndWritesSubtitles(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $tts->synthesize(FakeEdgeTTS::session()['text'], 'en-US-AriaNeural');
+
+        $this->assertSame(['Hello, world.', 'Is this a test?', 'Yes!'], self::words($tts->getSentenceBoundaries()));
+        $this->assertSame(self::WORDS, self::words($tts->getWordBoundaries()));
+        $this->assertSame(self::SRT, $tts->toSRT());
+        $this->assertStringStartsWith("WEBVTT\n\n00:00:00.050 --> 00:00:02.013\nHello, world.\n", $tts->toVTT());
+        $this->assertStringContainsString('"sentenceBoundaryEnabled":true', $tts->messages()[0]);
+    }
+
+    public function testGenerateReturnsEverythingWithoutTouchingTheInstance(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $result = $tts->generate(FakeEdgeTTS::session()['text'], 'en-US-AriaNeural', ['outputFormat' => 'webm-24khz-16bit-mono-opus']);
+
+        $this->assertSame(FakeEdgeTTS::recordedAudio(), $result->audio);
+        $this->assertSame('webm', $result->format);
+        $this->assertSame('webm-24khz-16bit-mono-opus', $result->outputFormat);
+        $this->assertSame(self::WORDS, self::words($result->wordBoundaries));
+        $this->assertCount(3, $result->sentenceBoundaries);
+        $this->assertEqualsWithDelta(0.122666, $result->duration, 0.000001);
+        $this->assertSame(self::SRT, $result->toSRT());
+        $this->assertSame($this->tmp . '/gen.webm', $result->toFile($this->tmp . '/gen'));
+
+        $this->assertSame([], $tts->getWordBoundaries());
+        $this->expectException(RuntimeException::class);
+        $tts->toRaw();
+    }
+
+    public function testDoesNotRepeatTheExtensionOfTheFile(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $tts->synthesize('hi', 'en-US-AriaNeural');
+        $this->assertSame($this->tmp . '/speech.mp3', $tts->toFile($this->tmp . '/speech.mp3'));
+    }
+
+    public function testUsesTheConstructorOptions(): void
+    {
+        $tts = new FakeEdgeTTS(null, [
+            'wssUrl' => 'wss://example.com/tts',
+            'secMsGecVersion' => '1-999.0.0.0',
+            'headers' => ['X-Test' => 'yes', 'User-Agent' => 'custom'],
+            'timeout' => 12,
+        ]);
+        $tts->synthesize('hi', 'en-US-AriaNeural');
+        $tts->synthesize('hi', 'en-US-AriaNeural', ['timeout' => 3]);
+
+        [$first, $second] = $tts->connections;
+        parse_str((string) parse_url($first['url'], PHP_URL_QUERY), $query);
+        $this->assertStringStartsWith('wss://example.com/tts?', $first['url']);
+        $this->assertSame('1-999.0.0.0', $query['Sec-MS-GEC-Version']);
+        $this->assertSame('yes', $first['headers']['X-Test']);
+        $this->assertSame('custom', $first['headers']['User-Agent']);
+        $this->assertSame(12.0, $first['timeout']);
+        $this->assertSame(3.0, $second['timeout']);
+    }
+
+    public function testRejectsAnUnknownOption(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unknown option wssURL');
+        new EdgeTTS(['wssURL' => 'wss://example.com']);
+    }
+
+    public function testCachesTheVoiceList(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $tts->voiceResponse = [200, [], self::RAW_VOICES];
+        $tts->getVoices();
+        $tts->getVoicesByLanguage('es');
+        $this->assertCount(1, $tts->voiceRequests);
+
+        $uncached = new FakeEdgeTTS(null, ['voicesCacheTtl' => 0]);
+        $uncached->voiceResponse = [200, [], self::RAW_VOICES];
+        $uncached->getVoices();
+        $uncached->getVoices();
+        $this->assertCount(2, $uncached->voiceRequests);
+    }
+
     public function testRefusesToSaveMissingMetadata(): void
     {
         $this->expectException(RuntimeException::class);

@@ -11,3 +11,5 @@ vendor/
 !composer.json
 !tests/fixtures/*.json
 composer.lock
+*.srt
+*.vtt

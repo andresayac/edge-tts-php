@@ -48,6 +48,37 @@ class SynthesizeCommandTest extends TestCase
         $this->assertStringContainsString('From a file', $tts->messages()[1]);
     }
 
+    public function testReadsTheTextFromStdin(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $tester = new CommandTester(new SynthesizeCommand($tts));
+        $tester->setInputs(['From stdin']);
+
+        $this->assertSame(Command::SUCCESS, $tester->execute(['--file' => '-', '--output' => $this->base]));
+        $this->assertStringContainsString('From stdin', $tts->messages()[1]);
+    }
+
+    public function testWritesTheFormatAndTheSubtitles(): void
+    {
+        $tts = new FakeEdgeTTS();
+        $tester = new CommandTester(new SynthesizeCommand($tts));
+
+        $code = $tester->execute([
+            '--text' => 'hi',
+            '--output' => $this->base . '.webm',
+            '--format' => 'webm-24khz-16bit-mono-opus',
+            '--subtitles' => $this->base . '.vtt',
+        ]);
+
+        $this->assertSame(Command::SUCCESS, $code);
+        $this->assertStringContainsString('"outputFormat":"webm-24khz-16bit-mono-opus"', $tts->messages()[0]);
+        $this->assertFileExists($this->base . '.webm');
+        $this->assertStringStartsWith("WEBVTT\n", (string) file_get_contents($this->base . '.vtt'));
+        $this->assertStringContainsString("Subtitles generated: {$this->base}.vtt", $tester->getDisplay());
+        unlink($this->base . '.webm');
+        unlink($this->base . '.vtt');
+    }
+
     public function testRequiresTextOrFile(): void
     {
         $tester = new CommandTester(new SynthesizeCommand(new FakeEdgeTTS()));

@@ -186,7 +186,7 @@ final class Protocol
         return "X-Timestamp:" . self::timestamp() . "\r\n"
             . "Content-Type:application/json; charset=utf-8\r\n"
             . "Path:speech.config\r\n\r\n"
-            . '{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},"outputFormat":'
+            . '{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":true,"wordBoundaryEnabled":true},"outputFormat":'
             . json_encode($format) . '}}}}';
     }
 
@@ -240,9 +240,11 @@ final class Protocol
     }
 
     /**
+     * The word and sentence boundaries of an audio.metadata message.
+     *
      * @return array<int, array{type: string, offset: int, duration: int, text: string}>
      */
-    public static function parseWordBoundaries(string $body): array
+    public static function parseBoundaries(string $body): array
     {
         $message = json_decode($body, true);
         if (!is_array($message) || !isset($message['Metadata']) || !is_array($message['Metadata'])) {
@@ -250,17 +252,65 @@ final class Protocol
         }
         $out = [];
         foreach ($message['Metadata'] as $meta) {
-            if (($meta['Type'] ?? '') !== 'WordBoundary') {
+            $type = $meta['Type'] ?? '';
+            if ($type !== 'WordBoundary' && $type !== 'SentenceBoundary') {
                 continue;
             }
             $out[] = [
-                'type' => 'WordBoundary',
+                'type' => $type,
                 'offset' => (int) ($meta['Data']['Offset'] ?? 0),
                 'duration' => (int) ($meta['Data']['Duration'] ?? 0),
                 'text' => (string) ($meta['Data']['text']['Text'] ?? ''),
             ];
         }
         return $out;
+    }
+
+    // Punctuation that opens a sentence and that the service leaves out of
+    // the text of its sentence boundaries.
+    private const OPENING_PUNCTUATION = ['¿', '¡', '«', '"', "'", '“', '‘', '(', '['];
+
+    /**
+     * Returns a function that puts back the opening punctuation the service
+     * drops from sentence boundaries, such as the ¿ of "¿Cómo estás?". It
+     * takes the sentences in order and finds each one in $source.
+     *
+     * @return callable(string): string
+     */
+    public static function sentenceTextRestorer(string $source): callable
+    {
+        $cursor = 0;
+        return function (string $text) use ($source, &$cursor): string {
+            $index = $text !== '' ? strpos($source, $text, $cursor) : false;
+            if ($index === false) {
+                return $text;
+            }
+            $start = $index;
+            do {
+                $moved = false;
+                foreach (self::OPENING_PUNCTUATION as $mark) {
+                    $length = strlen($mark);
+                    if ($start - $length >= $cursor && substr($source, $start - $length, $length) === $mark) {
+                        $start -= $length;
+                        $moved = true;
+                    }
+                }
+            } while ($moved);
+            $cursor = $index + strlen($text);
+            return substr($source, $start, $cursor - $start);
+        };
+    }
+
+    /**
+     * $path plus ".$extension", unless $path already ends with it.
+     */
+    public static function filePath(string $path, string $extension): string
+    {
+        $suffix = '.' . $extension;
+        if (strcasecmp(substr($path, -strlen($suffix)), $suffix) === 0) {
+            return $path;
+        }
+        return $path . $suffix;
     }
 
     /**

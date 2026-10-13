@@ -16,11 +16,14 @@ use RuntimeException;
  * Turns text into speech with the online text-to-speech service of
  * Microsoft Edge, without Edge, Windows or an API key.
  *
- * An instance keeps the audio and the word boundaries of its last
- * synthesis, which the to*() and get*() methods return.
+ * synthesize(), stream() and synthesizeStream() keep the audio and the
+ * boundaries of the last synthesis, which the to*() and get*() methods
+ * return. generate() returns them in a SynthesisResult instead.
  */
 class EdgeTTS
 {
+    private const OPTIONS = ['wssUrl', 'voicesUrl', 'secMsGecVersion', 'headers', 'timeout', 'voicesCacheTtl'];
+
     // One string rather than a list of chunks: reading it back costs no copy.
     private string $audio = '';
 
@@ -29,24 +32,78 @@ class EdgeTTS
     /** @var array<int, array{type: string, offset: int, duration: int, text: string}> */
     private array $word_boundaries = [];
 
-    /** Seconds to wait for the service before giving up. */
+    /** @var array<int, array{type: string, offset: int, duration: int, text: string}> */
+    private array $sentence_boundaries = [];
+
+    protected string $wssUrl = Constants::WSS_URL;
+
+    protected string $voicesUrl = Constants::VOICES_URL;
+
+    protected string $secMsGecVersion = Constants::SEC_MS_GEC_VERSION;
+
+    /** @var array<string, string> added to the default headers of every request */
+    protected array $headers = [];
+
+    /** Seconds without data from the service before giving up. */
     protected float $timeout = 30.0;
 
+    /** Seconds to reuse the voice list; 0 fetches it every time. */
+    protected int $voicesCacheTtl = 600;
+
+    /** @var array{expires: float, voices: array}|null */
+    private ?array $voicesCache = null;
+
     /**
-     * Returns every voice of the service.
+     * Every option is optional. The defaults come from Constants, so when
+     * Microsoft changes the service the new values can be set here without
+     * waiting for a release.
+     *
+     * @param array{wssUrl?: string, voicesUrl?: string, secMsGecVersion?: string, headers?: array<string, string>, timeout?: int|float, voicesCacheTtl?: int} $options
+     *     timeout and voicesCacheTtl are in seconds
+     */
+    public function __construct(array $options = [])
+    {
+        $unknown = array_diff(array_keys($options), self::OPTIONS);
+        if ($unknown) {
+            throw new InvalidArgumentException(
+                'Unknown option ' . implode(', ', $unknown) . '. Known options: ' . implode(', ', self::OPTIONS) . '.'
+            );
+        }
+        if (isset($options['headers']) && !is_array($options['headers'])) {
+            throw new InvalidArgumentException('The headers option must be an array of name => value.');
+        }
+        if (isset($options['timeout']) && $options['timeout'] <= 0) {
+            throw new InvalidArgumentException('The timeout option must be more than 0 seconds.');
+        }
+
+        $this->wssUrl = (string) ($options['wssUrl'] ?? $this->wssUrl);
+        $this->voicesUrl = (string) ($options['voicesUrl'] ?? $this->voicesUrl);
+        $this->secMsGecVersion = (string) ($options['secMsGecVersion'] ?? $this->secMsGecVersion);
+        $this->headers = $options['headers'] ?? $this->headers;
+        $this->timeout = (float) ($options['timeout'] ?? $this->timeout);
+        $this->voicesCacheTtl = (int) ($options['voicesCacheTtl'] ?? $this->voicesCacheTtl);
+    }
+
+    /**
+     * Returns every voice of the service. The list is kept for
+     * voicesCacheTtl seconds.
      *
      * @return array<int, array<string, mixed>>
      */
     public function getVoices(): array
     {
+        if ($this->voicesCache !== null && $this->voicesCache['expires'] > microtime(true)) {
+            return $this->voicesCache['voices'];
+        }
+
         for ($attempt = 0; ; $attempt++) {
-            $url = Constants::VOICES_URL
+            $url = $this->voicesUrl
                 . '?TrustedClientToken=' . Constants::TRUSTED_CLIENT_TOKEN
                 . '&Sec-MS-GEC=' . Protocol::secMsGec()
-                . '&Sec-MS-GEC-Version=' . Constants::SEC_MS_GEC_VERSION;
+                . '&Sec-MS-GEC-Version=' . $this->secMsGecVersion;
             [$status, $headers, $body] = $this->httpGet(
                 $url,
-                array_merge(Constants::getBaseHeaders(), Constants::VOICE_HEADERS)
+                array_merge(Constants::getBaseHeaders(), Constants::VOICE_HEADERS, $this->headers)
             );
 
             // A refused signature usually means the local clock is off.
@@ -65,7 +122,12 @@ class EdgeTTS
             if (!is_array($data)) {
                 throw new EdgeTTSException('Invalid voice list JSON');
             }
-            return Protocol::normalizeVoices($data);
+
+            $voices = Protocol::normalizeVoices($data);
+            if ($this->voicesCacheTtl > 0) {
+                $this->voicesCache = ['expires' => microtime(true) + $this->voicesCacheTtl, 'voices' => $voices];
+            }
+            return $voices;
         }
     }
 
@@ -111,12 +173,13 @@ class EdgeTTS
     }
 
     /**
-     * Speaks $text with $voice and keeps the audio and the word boundaries.
+     * Speaks $text with $voice and keeps the audio and the boundaries.
      *
-     * @param array{pitch?: int|float|string, rate?: int|float|string, volume?: int|float|string, outputFormat?: string} $options
+     * @param array{pitch?: int|float|string, rate?: int|float|string, volume?: int|float|string, outputFormat?: string, timeout?: int|float} $options
      *     pitch from "-100Hz" to "+100Hz", rate such as "+50%", volume from
-     *     "-100%" to "+100%" (numbers work too) and the output format
-     * @throws InvalidArgumentException when an option is invalid
+     *     "-100%" to "+100%" (numbers work too), the output format, and the
+     *     timeout in seconds for this call
+     * @throws InvalidArgumentException when the text is empty or an option is invalid
      * @throws EmptyAudioException when the voice cannot read the text
      * @throws EdgeTTSException when the service fails
      */
@@ -156,6 +219,40 @@ class EdgeTTS
      */
     public function stream(string $text, string $voice = Constants::DEFAULT_VOICE, array $options = []): Generator
     {
+        [$socket, $format] = $this->request($text, $voice, $options);
+
+        $this->audio = '';
+        $this->word_boundaries = [];
+        $this->sentence_boundaries = [];
+        $this->output_format = $format;
+
+        return $this->keep($this->receive($socket, self::collector($text, $this->word_boundaries, $this->sentence_boundaries)));
+    }
+
+    /**
+     * Speaks $text with $voice and returns the audio, the boundaries and the
+     * duration, without changing what this instance keeps.
+     */
+    public function generate(string $text, string $voice = Constants::DEFAULT_VOICE, array $options = []): SynthesisResult
+    {
+        [$socket, $format] = $this->request($text, $voice, $options);
+
+        $audio = '';
+        $words = [];
+        $sentences = [];
+        foreach ($this->receive($socket, self::collector($text, $words, $sentences)) as $chunk) {
+            $audio .= $chunk;
+        }
+        return new SynthesisResult($audio, $format, $words, $sentences);
+    }
+
+    /**
+     * Checks the request, connects and sends it.
+     *
+     * @return array{0: WebSocket, 1: string} the connection and the output format
+     */
+    private function request(string $text, string $voice, array $options): array
+    {
         if (trim($text) === '') {
             throw new InvalidArgumentException('The text is empty.');
         }
@@ -169,12 +266,12 @@ class EdgeTTS
         if ($voice === '') {
             $voice = Constants::DEFAULT_VOICE;
         }
+        $timeout = isset($options['timeout']) ? (float) $options['timeout'] : $this->timeout;
+        if ($timeout <= 0) {
+            throw new InvalidArgumentException('The timeout option must be more than 0 seconds.');
+        }
 
-        $this->audio = '';
-        $this->word_boundaries = [];
-        $this->output_format = $format;
-
-        $socket = $this->open();
+        $socket = $this->open($timeout);
         try {
             $socket->send(Protocol::speechConfigMessage($format));
             $socket->send(Protocol::ssmlMessage(Protocol::randomHex(), Protocol::ssml($text, $voice, $pitch, $rate, $volume)));
@@ -182,15 +279,49 @@ class EdgeTTS
             $socket->close();
             throw $e;
         }
-
-        return $this->receive($socket);
+        return [$socket, $format];
     }
 
     /**
+     * Returns a function that files each boundary in $words or $sentences,
+     * putting back the opening punctuation the service drops from sentences.
+     */
+    private static function collector(string $text, array &$words, array &$sentences): callable
+    {
+        $restore = Protocol::sentenceTextRestorer($text);
+        return function (array $boundary) use (&$words, &$sentences, $restore): void {
+            if ($boundary['type'] === 'WordBoundary') {
+                $words[] = $boundary;
+                return;
+            }
+            $boundary['text'] = $restore($boundary['text']);
+            $sentences[] = $boundary;
+        };
+    }
+
+    /**
+     * Yields the audio of $chunks and keeps it.
+     *
      * @return Generator<int, string>
      */
-    private function receive(WebSocket $socket): Generator
+    private function keep(Generator $chunks): Generator
     {
+        foreach ($chunks as $chunk) {
+            $this->audio .= $chunk;
+            yield $chunk;
+        }
+    }
+
+    /**
+     * Yields the audio the service sends and passes each boundary to
+     * $onBoundary. Closes the connection however it ends.
+     *
+     * @param callable(array): void $onBoundary
+     * @return Generator<int, string>
+     */
+    private function receive(WebSocket $socket, callable $onBoundary): Generator
+    {
+        $received = false;
         try {
             while (true) {
                 [$opcode, $data] = $socket->receive();
@@ -209,7 +340,9 @@ class EdgeTTS
                 if ($opcode === WebSocket::TEXT) {
                     [$path, $body] = Protocol::parseTextFrame($data);
                     if ($path === 'audio.metadata') {
-                        array_push($this->word_boundaries, ...Protocol::parseWordBoundaries($body));
+                        foreach (Protocol::parseBoundaries($body) as $boundary) {
+                            $onBoundary($boundary);
+                        }
                     } elseif ($path === 'turn.end') {
                         break;
                     }
@@ -217,7 +350,7 @@ class EdgeTTS
                 }
                 [$path, $audio] = Protocol::parseBinaryFrame($data);
                 if ($path === 'audio' && $audio !== '') {
-                    $this->audio .= $audio;
+                    $received = true;
                     yield $audio;
                 }
             }
@@ -225,21 +358,25 @@ class EdgeTTS
             $socket->close();
         }
 
-        if ($this->audio === '') {
+        if (!$received) {
             throw new EmptyAudioException();
         }
     }
 
-    private function open(): WebSocket
+    private function open(float $timeout): WebSocket
     {
         for ($attempt = 0; ; $attempt++) {
-            $url = Constants::WSS_URL
+            $url = $this->wssUrl
                 . '?Ocp-Apim-Subscription-Key=' . Constants::TRUSTED_CLIENT_TOKEN
                 . '&Sec-MS-GEC=' . Protocol::secMsGec()
-                . '&Sec-MS-GEC-Version=' . Constants::SEC_MS_GEC_VERSION
+                . '&Sec-MS-GEC-Version=' . $this->secMsGecVersion
                 . '&ConnectionId=' . Protocol::randomHex();
             try {
-                return $this->connect($url, array_merge(Constants::getBaseHeaders(), Constants::WSS_HEADERS));
+                return $this->connect(
+                    $url,
+                    array_merge(Constants::getBaseHeaders(), Constants::WSS_HEADERS, $this->headers),
+                    $timeout
+                );
             } catch (HandshakeException $e) {
                 // A refused signature usually means the local clock is off.
                 if ($e->getStatusCode() === 403 && $attempt === 0 && Protocol::adjustClock($e->getHeaders())) {
@@ -255,9 +392,9 @@ class EdgeTTS
      *
      * @param array<string, string> $headers
      */
-    protected function connect(string $url, array $headers): WebSocket
+    protected function connect(string $url, array $headers, float $timeout): WebSocket
     {
-        return WebSocket::connect($url, $headers, $this->timeout);
+        return WebSocket::connect($url, $headers, $timeout);
     }
 
     /**
@@ -302,12 +439,13 @@ class EdgeTTS
     }
 
     /**
-     * Writes the audio to $output_path plus the extension of the output
-     * format, or $format when given, and returns the path it wrote.
+     * Writes the audio to $output_path, adding the extension of the output
+     * format, or $format when given, unless the path already ends with it.
+     * Returns the path it wrote.
      */
     public function toFile(string $output_path, ?string $format = null): string
     {
-        $path = $output_path . '.' . ($format ?? Protocol::fileExtension($this->output_format));
+        $path = Protocol::filePath($output_path, $format ?? Protocol::fileExtension($this->output_format));
         if (@file_put_contents($path, $this->toRaw()) === false) {
             $error = error_get_last()['message'] ?? 'unknown error';
             throw new RuntimeException("Failed to write the audio to {$path}: {$error}");
@@ -345,6 +483,22 @@ class EdgeTTS
     }
 
     /**
+     * SRT subtitles of the last synthesis, one cue per sentence.
+     */
+    public function toSRT(): string
+    {
+        return Subtitles::toSRT($this->sentence_boundaries ?: $this->word_boundaries);
+    }
+
+    /**
+     * WebVTT subtitles of the last synthesis, one cue per sentence.
+     */
+    public function toVTT(): string
+    {
+        return Subtitles::toVTT($this->sentence_boundaries ?: $this->word_boundaries);
+    }
+
+    /**
      * Writes the word boundaries to $output_path as JSON.
      */
     public function saveMetadata(string $output_path): void
@@ -368,5 +522,16 @@ class EdgeTTS
     public function getWordBoundaries(): array
     {
         return $this->word_boundaries;
+    }
+
+    /**
+     * When each sentence of the last synthesis is spoken, with the opening
+     * punctuation of the text (¿, ¡, «...) that the service leaves out.
+     *
+     * @return array<int, array{type: string, offset: int, duration: int, text: string}>
+     */
+    public function getSentenceBoundaries(): array
+    {
+        return $this->sentence_boundaries;
     }
 }

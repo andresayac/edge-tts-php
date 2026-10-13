@@ -4,6 +4,7 @@ namespace Afaya\EdgeTTS\Tests;
 
 use Afaya\EdgeTTS\Exception\EdgeTTSException;
 use Afaya\EdgeTTS\Service\Protocol;
+use Afaya\EdgeTTS\Service\Subtitles;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
@@ -104,18 +105,53 @@ class ProtocolTest extends TestCase
         Protocol::parseBinaryFrame("\x00\x09x");
     }
 
-    public function testParsesEveryWordBoundaryOfAMessage(): void
+    public function testParsesEveryBoundaryOfAMessage(): void
     {
         $body = '{"Metadata":[
             {"Type":"WordBoundary","Data":{"Offset":1,"Duration":2,"text":{"Text":"a"}}},
             {"Type":"SentenceBoundary","Data":{"Offset":1,"Duration":9,"text":{"Text":"a b"}}},
+            {"Type":"SessionEnd","Data":{"Offset":10}},
             {"Type":"WordBoundary","Data":{"Offset":3,"Duration":4,"text":{"Text":"b"}}}
         ]}';
         $this->assertSame([
             ['type' => 'WordBoundary', 'offset' => 1, 'duration' => 2, 'text' => 'a'],
+            ['type' => 'SentenceBoundary', 'offset' => 1, 'duration' => 9, 'text' => 'a b'],
             ['type' => 'WordBoundary', 'offset' => 3, 'duration' => 4, 'text' => 'b'],
-        ], Protocol::parseWordBoundaries($body));
-        $this->assertSame([], Protocol::parseWordBoundaries('not json'));
+        ], Protocol::parseBoundaries($body));
+        $this->assertSame([], Protocol::parseBoundaries('not json'));
+    }
+
+    public function testPutsBackTheOpeningPunctuationTheServiceDrops(): void
+    {
+        $restore = Protocol::sentenceTextRestorer('¿Cómo estás? ¡Qué bien! Dijo: «hola». (Nota) Normal.');
+        $this->assertSame(
+            ['¿Cómo estás?', '¡Qué bien!', 'Dijo: «hola».', '(Nota)', 'Normal.', 'not in source'],
+            array_map($restore, ['Cómo estás?', 'Qué bien!', 'Dijo: «hola».', 'Nota)', 'Normal.', 'not in source'])
+        );
+    }
+
+    public function testDoesNotRepeatAnExtensionThatIsThere(): void
+    {
+        $this->assertSame('out.mp3', Protocol::filePath('out', 'mp3'));
+        $this->assertSame('out.mp3', Protocol::filePath('out.mp3', 'mp3'));
+        $this->assertSame('OUT.MP3', Protocol::filePath('OUT.MP3', 'mp3'));
+        $this->assertSame('out.webm.mp3', Protocol::filePath('out.webm', 'mp3'));
+    }
+
+    public function testWritesSubtitles(): void
+    {
+        $cues = [
+            ['offset' => 500000, 'duration' => 19625000, 'text' => 'Hello, world.'],
+            ['offset' => 0, 'duration' => 36000000000, 'text' => 'long'],
+        ];
+        $this->assertSame(
+            "1\n00:00:00,050 --> 00:00:02,013\nHello, world.\n\n2\n00:00:00,000 --> 01:00:00,000\nlong\n",
+            Subtitles::toSRT($cues)
+        );
+        $this->assertSame(
+            "WEBVTT\n\n00:00:00.050 --> 00:00:02.013\nHello, world.\n\n00:00:00.000 --> 01:00:00.000\nlong\n",
+            Subtitles::toVTT($cues)
+        );
     }
 
     public function testNamesTheFileAfterTheFormat(): void

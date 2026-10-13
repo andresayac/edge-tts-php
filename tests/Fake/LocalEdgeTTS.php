@@ -3,31 +3,19 @@
 namespace Afaya\EdgeTTS\Tests\Fake;
 
 use Afaya\EdgeTTS\Service\EdgeTTS;
-use Afaya\EdgeTTS\Transport\WebSocket;
 
 /**
  * An EdgeTTS that sends its real requests to the local server of
- * server.php instead of the service.
+ * server.php, through the wssUrl and voicesUrl options.
  */
 class LocalEdgeTTS extends EdgeTTS
 {
-    private string $wssUrl;
-    private string $voicesUrl;
-
-    public function __construct(int $port, string $route, float $timeout = 5.0)
+    public function __construct(int $port, string $route, float $timeout = 5.0, array $options = [])
     {
-        $this->wssUrl = "ws://127.0.0.1:{$port}/ws/{$route}";
-        $this->voicesUrl = "http://127.0.0.1:{$port}/voices/{$route}";
-        $this->timeout = $timeout;
-    }
-
-    protected function connect(string $url, array $headers): WebSocket
-    {
-        return parent::connect($this->wssUrl . '?' . parse_url($url, PHP_URL_QUERY), $headers);
-    }
-
-    protected function httpGet(string $url, array $headers): array
-    {
-        return parent::httpGet($this->voicesUrl . '?' . parse_url($url, PHP_URL_QUERY), $headers);
+        parent::__construct($options + [
+            'wssUrl' => "ws://127.0.0.1:{$port}/ws/{$route}",
+            'voicesUrl' => "http://127.0.0.1:{$port}/voices/{$route}",
+            'timeout' => $timeout,
+        ]);
     }
 }
