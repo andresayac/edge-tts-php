@@ -1,20 +1,29 @@
 {
     "name": "afaya/edge-tts",
     "description": "Edge TTS is a PHP package that allows access to the online text-to-speech service used by Microsoft Edge without the need for Microsoft Edge, Windows, or an API key.",
-    "version": "1.7.0",
+    "version": "1.8.3",
     "type": "library",
-    "license": "GPL-3.0+",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/andresayac/edge-tts-php"
+    "keywords": ["edge", "tts", "text-to-speech", "microsoft", "speech-synthesis"],
+    "homepage": "https://github.com/andresayac/edge-tts-php",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Andres Aya"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/andresayac/edge-tts-php/issues",
+        "source": "https://github.com/andresayac/edge-tts-php"
     },
     "require": {
-        "php": ">=7.4 <8.5",
-        "symfony/console": "^5.4|^6.0|^7.0",
-        "ratchet/pawl": "^0.4.1",
-        "ramsey/uuid": "^4.2",
-        "react/event-loop": "^1.3",
-        "react/async": "^4.3"
+        "php": ">=7.4",
+        "ext-json": "*",
+        "ext-openssl": "*",
+        "composer/ca-bundle": "^1.3",
+        "symfony/console": "^5.4|^6.0|^7.0|^8.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
     },
     "autoload": {
         "psr-4": {
@@ -29,7 +38,10 @@
     "bin": [
         "src/Cli/edge-tts"
     ],
-    "require-dev": {
-        "phpunit/phpunit": "^9.5"
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
     }
 }

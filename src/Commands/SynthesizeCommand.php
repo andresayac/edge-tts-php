@@ -8,69 +8,66 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-/**
- * @AsCommand(name="edge-tts:synthesize")
- */
 class SynthesizeCommand extends Command
 {
-    protected static $defaultName = 'edge-tts:synthesize';
-    protected static $defaultDescription = 'Edge TTS: synthesize text to audio';
+    private ?EdgeTTS $tts;
+
+    public function __construct(?EdgeTTS $tts = null)
+    {
+        $this->tts = $tts;
+        parent::__construct('edge-tts:synthesize');
+    }
 
     protected function configure(): void
     {
         $this
+            ->setAliases(['synthesize'])
             ->setDescription('Edge TTS: synthesize text to audio')
-            ->addOption('text', 'txt',  InputOption::VALUE_REQUIRED, 'Text to convert to audio')
-            ->addOption('voice', 'vcl', InputOption::VALUE_OPTIONAL, 'Voice to use for the audio synthesis', 'en-US-AriaNeural')
-            ->addOption('rate', 'r', InputOption::VALUE_OPTIONAL, 'Rate of speech', '0%')
-            ->addOption('volume', 'lvl',  InputOption::VALUE_OPTIONAL, 'Volume of speech', '0%')
-            ->addOption('pitch', 'pit', InputOption::VALUE_OPTIONAL, 'Pitch of speech', '0Hz')
-            ->addOption('output', 'out',  InputOption::VALUE_OPTIONAL, 'Output file name', null)
-            ->addOption('file', 'f', InputOption::VALUE_OPTIONAL, 'Input file name', null)
-        ;
+            ->addOption('text', 't', InputOption::VALUE_REQUIRED, 'Text to convert to audio')
+            ->addOption('file', 'f', InputOption::VALUE_REQUIRED, 'Input file (text)')
+            ->addOption('voice', null, InputOption::VALUE_REQUIRED, 'Voice to use for the audio synthesis', 'en-US-AriaNeural')
+            ->addOption('rate', 'r', InputOption::VALUE_REQUIRED, 'Rate of speech', '0%')
+            ->addOption('volume', 'l', InputOption::VALUE_REQUIRED, 'Volume of speech', '0%')
+            ->addOption('pitch', 'p', InputOption::VALUE_REQUIRED, 'Pitch of speech', '0Hz')
+            ->addOption('output', 'o', InputOption::VALUE_REQUIRED, 'Output file name, without extension');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $text = (string) $input->getOption('text');
+        $file = (string) $input->getOption('file');
 
-        $text = $input->getOption('text');
-        $voice = $input->getOption('voice');
-        $pitch = $input->getOption('pitch');
-        $rate = $input->getOption('rate');
-        $volume = $input->getOption('volume');
-        $output_file = $input->getOption('output') ?? 'output_' . time();
-        $file = $input->getOption('file');
-
-        if (empty($text) && !empty($file)) {
-            $output->writeln("Error: Text or file is required");
+        if ($text === '' && $file === '') {
+            $output->writeln('<error>Error: Text (--text) or file (--file) is required</error>');
             return Command::FAILURE;
         }
-
-        if ($text && $file) {
-            $output->writeln("Error: Cannot use both text and file options");
+        if ($text !== '' && $file !== '') {
+            $output->writeln('<error>Error: Cannot use both text (--text) and file (--file) options</error>');
             return Command::FAILURE;
         }
-
-        $content = $text;
-
-        if ($file) {
-            $content = file_get_contents($file);
-
-            if (empty($content)) {
-                $output->writeln("Error: File is empty");
+        if ($file !== '') {
+            $text = is_file($file) ? (string) file_get_contents($file) : '';
+            if (trim($text) === '') {
+                $output->writeln("<error>Error: File {$file} is missing or empty</error>");
                 return Command::FAILURE;
             }
+            $output->writeln("Reading from file: {$file}");
         }
 
-        $tts = new EdgeTTS();
-        $tts->synthesize($content, $voice, [
-            'rate' => $rate,
-            'volume' => $volume,
-            'pitch' => $pitch
-        ]);
-        $tts->toFile("{$output_file}");
-        $output->writeln("Audio file generated: {$output_file}.mp3");
+        $tts = $this->tts ?? new EdgeTTS();
+        try {
+            $tts->synthesize($text, (string) $input->getOption('voice'), [
+                'rate' => $input->getOption('rate'),
+                'volume' => $input->getOption('volume'),
+                'pitch' => $input->getOption('pitch'),
+            ]);
+            $path = $tts->toFile((string) ($input->getOption('output') ?? 'output_' . time()));
+        } catch (\Exception $e) {
+            $output->writeln('<error>Error: ' . $e->getMessage() . '</error>');
+            return Command::FAILURE;
+        }
 
+        $output->writeln("Audio file generated: {$path}");
         return Command::SUCCESS;
     }
 }

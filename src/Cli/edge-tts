@@ -1,23 +1,36 @@
-#!/usr/bin/php
+#!/usr/bin/env php
 <?php
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../vendor/autoload.php';
-
-use Symfony\Component\Console\Application;
-use Afaya\EdgeTTS\Commands\SynthesizeCommand;
-use Afaya\EdgeTTS\Commands\VoiceListCommand;
-
-
-$application = new Application('Edge TTS CLI', '1.7.0');
-$application->add(new SynthesizeCommand());
-$application->add(new VoiceListCommand());
-
-
-try {
-    $application->run();
-} catch (\Exception $e) {
-    fwrite(STDERR, 'Error: ' . $e->getMessage() . PHP_EOL);
+// Composer sets the first when it runs the binary; the others cover running
+// it from a clone and from vendor/afaya/edge-tts/src/Cli.
+$autoloads = [
+    $GLOBALS['_composer_autoload_path'] ?? null,
+    __DIR__ . '/../../vendor/autoload.php',
+    __DIR__ . '/../../../../autoload.php',
+];
+$loaded = false;
+foreach ($autoloads as $autoload) {
+    if ($autoload !== null && is_file($autoload)) {
+        require $autoload;
+        $loaded = true;
+        break;
+    }
+}
+if (!$loaded) {
+    fwrite(STDERR, 'Error: run "composer install" first.' . PHP_EOL);
     exit(1);
 }
+
+use Afaya\EdgeTTS\Commands\SynthesizeCommand;
+use Afaya\EdgeTTS\Commands\VoiceListCommand;
+use Afaya\EdgeTTS\Config\Constants;
+use Symfony\Component\Console\Application;
+
+$application = new Application('Edge TTS CLI', Constants::VERSION);
+foreach ([new SynthesizeCommand(), new VoiceListCommand()] as $command) {
+    // add() is deprecated since Symfony 7.4 and gone in 8.0.
+    method_exists($application, 'addCommand') ? $application->addCommand($command) : $application->add($command);
+}
+$application->run();

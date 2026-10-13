@@ -1,4 +1,13 @@
 vendor/
+.phpunit.result.cache
+.phpunit.cache/
+
+# Generated audio and metadata
 *.wav
 *.mp3
+*.webm
+*.ogg
 *.json
+!composer.json
+!tests/fixtures/*.json
+composer.lock

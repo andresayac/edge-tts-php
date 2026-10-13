@@ -2,539 +2,328 @@
 
 namespace Afaya\EdgeTTS\Service;
 
-use Ratchet\Client\Connector;
-use React\Socket\Connector as SocketConnector;
-use Ramsey\Uuid\Uuid;
 use Afaya\EdgeTTS\Config\Constants;
-use React\EventLoop\Loop;
+use Afaya\EdgeTTS\Exception\EdgeTTSException;
+use Afaya\EdgeTTS\Exception\EmptyAudioException;
+use Afaya\EdgeTTS\Exception\HandshakeException;
+use Afaya\EdgeTTS\Transport\Http;
+use Afaya\EdgeTTS\Transport\WebSocket;
+use Generator;
 use InvalidArgumentException;
 use RuntimeException;
-use DateTime;
-use DateTimeZone;
 
+/**
+ * Turns text into speech with the online text-to-speech service of
+ * Microsoft Edge, without Edge, Windows or an API key.
+ *
+ * An instance keeps the audio and the word boundaries of its last
+ * synthesis, which the to*() and get*() methods return.
+ */
 class EdgeTTS
 {
-    private array $audio_stream = [];
-    private string $audio_format = 'mp3';
+    // One string rather than a list of chunks: reading it back costs no copy.
+    private string $audio = '';
+
     private string $output_format = 'audio-24khz-48kbitrate-mono-mp3';
-    private array $headers;
+
+    /** @var array<int, array{type: string, offset: int, duration: int, text: string}> */
     private array $word_boundaries = [];
-    private int $offset_compensation = 0;
-    private int $last_duration_offset = 0;
 
-    public function __construct()
-    {
-        $this->headers = array_merge(
-            Constants::getBaseHeaders(),
-            Constants::WSS_HEADERS
-        );
-    }
+    /** Seconds to wait for the service before giving up. */
+    protected float $timeout = 30.0;
 
-    private function normalizeVoices(array $data): array
-    {
-        $out = [];
-
-        foreach ($data as $v) {
-            $short  = $v['ShortName'] ?? '';
-            $locale = $v['Locale'] ?? '';
-
-            $base = preg_replace('/^[a-z]{2}-[A-Z]{2}-/', '', $short);
-            $base = preg_replace('/NeuralHD$/', '', $base);
-            $base = preg_replace('/Neural$/', '', $base);
-            $base = trim($base);
-
-            $voiceType = $v['VoiceType']
-                ?? (stripos(($v['Name'] ?? '') . ' ' . $short, 'NeuralHD') !== false ? 'NeuralHD' : 'Neural');
-
-            $localeName = $v['LocaleName'] ?? ($locale ?: null);
-
-            $display = $v['DisplayName'] ?? ($v['FriendlyName'] ?? ($base ?: $short));
-            $display = preg_replace('/^Microsoft\s+/i', '', $display);
-            $display = trim(explode(' - ', $display)[0]);
-
-            // ✅ quitar "Online (Natural)" y variantes
-            $display = preg_replace('/\s*Online\s*\(Natural\)\s*/i', ' ', $display);
-            $display = preg_replace('/\s*Online\s*/i', ' ', $display);
-            $display = trim(preg_replace('/\s+/', ' ', $display));
-
-            $tag = (isset($v['VoiceTag']) && is_array($v['VoiceTag'])) ? $v['VoiceTag'] : [];
-            $tailored = $tag['TailoredScenarios'] ?? $tag['ContentCategories'] ?? [];
-            $personalities = $tag['VoicePersonalities'] ?? [];
-
-            $out[] = [
-                'Name' => $short ?: ($v['Name'] ?? ''),
-                'OriginalName' => $v['Name'] ?? '',
-                'DisplayName' => $display,
-                'LocalName' => $display,
-                'ShortName' => $short ?: ($v['Name'] ?? ''),
-                'Gender' => $v['Gender'] ?? null,
-                'Locale' => $locale ?: null,
-                'LocaleName' => $localeName,
-                'SecondaryLocaleList' => $v['SecondaryLocaleList'] ?? [],
-                'VoiceType' => $voiceType,
-                'VoiceTag' => [
-                    'TailoredScenarios' => is_array($tailored) ? $tailored : [],
-                    'VoicePersonalities' => is_array($personalities) ? $personalities : [],
-                ],
-                'FriendlyName' => "{$display} ({$voiceType}) - {$localeName}",
-            ];
-        }
-
-        return $out;
-    }
-
+    /**
+     * Returns every voice of the service.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     public function getVoices(): array
     {
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'header' => $this->formatHeaders(array_merge(
-                    Constants::getBaseHeaders(),
-                    Constants::VOICE_HEADERS
-                ))
-            ],
-            "ssl" => array(
-                "verify_peer" => false,
-                "verify_peer_name" => false,
-            ),
-        ]);
+        for ($attempt = 0; ; $attempt++) {
+            $url = Constants::VOICES_URL
+                . '?TrustedClientToken=' . Constants::TRUSTED_CLIENT_TOKEN
+                . '&Sec-MS-GEC=' . Protocol::secMsGec()
+                . '&Sec-MS-GEC-Version=' . Constants::SEC_MS_GEC_VERSION;
+            [$status, $headers, $body] = $this->httpGet(
+                $url,
+                array_merge(Constants::getBaseHeaders(), Constants::VOICE_HEADERS)
+            );
 
-        $json = file_get_contents(
-            Constants::VOICES_URL . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN) . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION),
-            false,
-            $context
-        );
+            // A refused signature usually means the local clock is off.
+            if ($status === 403 && $attempt === 0 && Protocol::adjustClock($headers)) {
+                continue;
+            }
+            if ($status !== 200) {
+                throw new EdgeTTSException("Voice list request failed with status {$status}");
+            }
 
-        if ($json === false) {
-            throw new RuntimeException("Failed to fetch voices list");
+            $data = json_decode($body, true);
+            // Either a bare list or an object with a voices list.
+            if (is_array($data) && $data !== [] && !array_key_exists(0, $data)) {
+                $data = $data['voices'] ?? $data['Voices'] ?? null;
+            }
+            if (!is_array($data)) {
+                throw new EdgeTTSException('Invalid voice list JSON');
+            }
+            return Protocol::normalizeVoices($data);
         }
-
-        $data = json_decode($json, true);
-        if (!is_array($data)) {
-            throw new RuntimeException("Invalid response from voices API");
-        }
-
-        $voices = [];
-
-        $voices = $this->normalizeVoices($data);
-
-        return $voices;
     }
 
-    private function formatHeaders(array $headers): string
+    /**
+     * Returns the voices whose locale starts with $locale, so "en" matches
+     * every English voice and "en-US" only the American ones.
+     */
+    public function getVoicesByLanguage(string $locale): array
     {
-        return implode("\r\n", array_map(
-            fn($k, $v) => "$k: $v",
-            array_keys($headers),
-            array_values($headers)
-        ));
+        return array_values(array_filter($this->getVoices(), function (array $voice) use ($locale): bool {
+            return strncmp((string) $voice['Locale'], $locale, strlen($locale)) === 0;
+        }));
     }
 
+    /**
+     * Returns the voices of $gender, "Male" or "Female".
+     */
+    public function getVoicesByGender(string $gender): array
+    {
+        return array_values(array_filter($this->getVoices(), function (array $voice) use ($gender): bool {
+            return $voice['Gender'] === $gender;
+        }));
+    }
+
+    /**
+     * Returns $voice when the service has it.
+     *
+     * @throws InvalidArgumentException when it does not
+     */
     public function checkVoice(string $voice): string
     {
-        $voices = $this->getVoices();
-        $matchedVoice = array_filter($voices, function ($v) use ($voice) {
-            return $v['ShortName'] === $voice;
-        });
-
-        if (empty($matchedVoice)) {
-            throw new InvalidArgumentException("Invalid voice. Use getVoices() to get a list of available voices.");
+        foreach ($this->getVoices() as $v) {
+            if ($v['ShortName'] === $voice) {
+                return $v['ShortName'];
+            }
         }
-
-        return reset($matchedVoice)['ShortName'];
+        throw new InvalidArgumentException('Invalid voice. Use getVoices() to get a list of available voices.');
     }
-
 
     public function escapeXML(string $text): string
     {
-        return htmlspecialchars($text, ENT_QUOTES | ENT_XML1, 'UTF-8');
-    }
-
-    private function getSSML(string $content, string $voice, array $options = []): string
-    {
-        $options = array_merge([
-            'pitch' => '+0Hz',
-            'rate' => '0%',
-            'volume' => '0%'
-        ], $options);
-
-        $options['pitch'] = str_replace('hz', 'Hz', $options['pitch']);
-
-        $pitch = $this->validatePitch($options['pitch'] ?? 0);
-        $rate = $this->validateRate($options['rate'] ?? 0);
-        $volume = $this->validateVolume($options['volume'] ?? 0);
-
-        $escapedText = $this->escapeXML($content);
-
-        return '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
-                    <voice name="' . $voice . '">
-                        <prosody pitch="' . $pitch . '" rate="' . $rate . '" volume="' . $volume . '">
-                            ' . $escapedText . '
-                        </prosody>
-                    </voice>
-                </speak>
-        ';
-    }
-
-    private function validatePitch(string $pitch): string
-    {
-        if (!preg_match('/^[+-]?\d{1,3}Hz$/', $pitch) || intval($pitch) < -100 || intval($pitch) > 100) {
-            throw new InvalidArgumentException("Invalid pitch format. Expected format: '-100Hz to +100Hz'.");
-        }
-        return $pitch;
-    }
-
-    private function validateRate(string $rate): string
-    {
-        if (!preg_match('/^[+-]?\d{1,3}%$/', $rate) || intval($rate) < -100 || intval($rate) > 100) {
-            throw new InvalidArgumentException("Invalid rate format. Expected format: '-100% to +100%'.");
-        }
-        return $rate;
-    }
-
-    private function validateVolume(string $volume): string
-    {
-        if (!preg_match('/^[+-]?\d{1,3}%$/', $volume) || intval($volume) < -100 || intval($volume) > 100) {
-            throw new InvalidArgumentException("Invalid volume format. Expected format: '-100% to +100%'.");
-        }
-        return $volume;
+        return Protocol::escapeXml($text);
     }
 
     /**
-     * Synthesizes text to speech using the Edge TTS service.
+     * Speaks $text with $voice and keeps the audio and the word boundaries.
      *
-     * @param string $text The text to be synthesized.
-     * @param string $voice The voice to use (default: 'en-US-AnaNeural').
-     * @param array $options Options for the synthesis (rate, volume, pitch, inputType, outputFormat).
-     * @return void
+     * @param array{pitch?: int|float|string, rate?: int|float|string, volume?: int|float|string, outputFormat?: string} $options
+     *     pitch from "-100Hz" to "+100Hz", rate such as "+50%", volume from
+     *     "-100%" to "+100%" (numbers work too) and the output format
+     * @throws InvalidArgumentException when an option is invalid
+     * @throws EmptyAudioException when the voice cannot read the text
+     * @throws EdgeTTSException when the service fails
      */
-    public function synthesize(string $text, string $voice = 'en-US-AnaNeural', array $options = []): void
+    public function synthesize(string $text, string $voice = Constants::DEFAULT_VOICE, array $options = []): void
     {
-
-        if (isset($options['outputFormat']) && !in_array($options['outputFormat'], Constants::OUTPUT_FORMAT)) {
-            throw new InvalidArgumentException("Invalid output format. Use one of: " . implode(', ', Constants::OUTPUT_FORMAT));
+        foreach ($this->stream($text, $voice, $options) as $chunk) {
+            // stream() keeps the audio.
         }
-
-        $this->output_format = $options['outputFormat'] ?? 'audio-24khz-48kbitrate-mono-mp3';
-        $this->audio_format = $this->getFileExtension($this->output_format);
-
-        $loop = Loop::get();
-
-        $socketConnector = new SocketConnector($loop, [
-            'tls' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-            ]
-        ]);
-        $connector = new Connector($loop, $socketConnector);
-
-        $req_id = Uuid::uuid4()->toString();
-
-        $url = Constants::WSS_URL
-            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
-            . "&ConnectionId=" . $req_id
-            . "&Sec-MS-GEC=" . $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN)
-            . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
-
-        $SSML_text = $this->getSSML($text, $voice, $options);
-
-        $connector($url, [], array_merge($this->headers, [
-            'Sec-WebSocket-Protocol' => 'synthesize'
-        ]))->then(
-
-            function ($ws) use ($SSML_text, $req_id) {
-                $this->sendTTSRequest($ws, $SSML_text, $req_id);
-            },
-            function ($e) {
-                echo "Error: {$e->getMessage()}\n";
-            }
-        );
-
-        $loop->run();
-    }
-
-    public function synthesizeStream(string $text, string $voice = 'en-US-AnaNeural', array $options = [], ?callable $onChunk = null): void
-    {
-        if (isset($options['outputFormat']) && !in_array($options['outputFormat'], Constants::OUTPUT_FORMAT)) {
-            throw new InvalidArgumentException("Invalid output format. Use one of: " . implode(', ', Constants::OUTPUT_FORMAT));
-        }
-
-        $this->audio_stream = [];
-        $this->output_format = $options['outputFormat'] ?? 'audio-24khz-48kbitrate-mono-mp3';
-        $this->audio_format = $this->getFileExtension($this->output_format);
-
-        $loop = Loop::get();
-        $socketConnector = new SocketConnector($loop, [
-            'tls' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-            ]
-        ]);
-        $connector = new Connector($loop, $socketConnector);
-
-        $reqId     = Uuid::uuid4()->toString();
-        $secMsGEC  = $this->generateSecMsGec(Constants::TRUSTED_CLIENT_TOKEN);
-
-
-        $url = Constants::WSS_URL
-            . "?TrustedClientToken=" . Constants::TRUSTED_CLIENT_TOKEN
-            . "&ConnectionId="       . $reqId
-            . "&Sec-MS-GEC="         . $secMsGEC
-            . "&Sec-MS-GEC-Version=" . urlencode(Constants::SEC_MS_GEC_VERSION);
-
-        $SSML = $this->getSSML($text, $voice, $options);
-
-        $timeout = $loop->addTimer(30.0, function () use (&$ws) {
-            if (isset($ws) && $ws && $ws->readyState === 1 /* OPEN */) {
-                $ws->close();
-            }
-        });
-
-        $connector($url, [], array_merge($this->headers, [
-            'Sec-WebSocket-Protocol' => 'synthesize',
-        ]))->then(
-            function ($socket) use ($SSML, $reqId, $loop, $timeout, $onChunk, &$ws) {
-                $ws = $socket;
-                $ws->send($this->buildTTSConfigMessage());
-
-                $speechMsg =
-                    "X-RequestId:{$reqId}\r\n" .
-                    "Content-Type:application/ssml+xml\r\n" .
-                    "X-Timestamp:" . $this->getXTime() . "\r\n" .
-                    "Path:ssml\r\n\r\n" .
-                    $SSML;
-                $ws->send($speechMsg);
-
-
-                $ws->on('message', function ($data) use ($ws, $onChunk) {
-                    if (strpos($data, "Path:audio.metadata") !== false) {
-                        $metadataStart = strpos($data, "\r\n\r\n") + 4;
-                        $metadataJson  = substr($data, $metadataStart);
-                        $meta = $this->parseMetadata($metadataJson);
-                        if ($meta !== null) {
-                            $this->word_boundaries[] = $meta;
-                            $this->last_duration_offset = $meta['offset'] + $meta['duration'];
-                        }
-                        return;
-                    }
-
-                    if (strpos($data, "Path:turn.end") !== false) {
-                        $this->offset_compensation = $this->last_duration_offset + 8750000;
-                        $ws->close();
-                        return;
-                    }
-
-                    $needle = "Path:audio\r\n";
-                    $pos = strpos($data, $needle);
-                    if ($pos !== false) {
-                        $audioChunk = substr($data, $pos + strlen($needle));
-                        $this->audio_stream[] = $audioChunk;
-
-
-                        if ($onChunk) {
-                            $onChunk($audioChunk); // <- string binario del fragmento
-                        }
-                    }
-                });
-
-                $ws->on('error', function ($e) use ($loop, $timeout) {
-                    $loop->cancelTimer($timeout);
-                    throw new RuntimeException("WebSocket error: " . $e->getMessage());
-                });
-
-                $ws->on('close', function () use ($loop, $timeout) {
-                    $loop->cancelTimer($timeout);
-                    $loop->stop();
-                });
-            },
-            function ($e) {
-                throw new RuntimeException("Connect error: " . $e->getMessage());
-            }
-        );
-
-        // Corre hasta que el WS cierre
-        $loop->run();
     }
 
     /**
-     * Sends the TTS request over WebSocket and processes the audio stream.
+     * Speaks $text with $voice and calls $onChunk with the audio as it
+     * arrives. The audio is also kept, as with synthesize().
+     *
+     * @param callable(string): void|null $onChunk
      */
-    private function sendTTSRequest($ws, string $SSML_text, string $req_id): void
+    public function synthesizeStream(string $text, string $voice = Constants::DEFAULT_VOICE, array $options = [], ?callable $onChunk = null): void
     {
-        $message = $this->buildTTSConfigMessage();
-        $ws->send($message);
-
-        $message = "X-RequestId:{$req_id}\r\n" .
-            "Content-Type:application/ssml+xml\r\n" .
-            "X-Timestamp:" . $this->getXTime() . "\r\n" .
-            "Path:ssml\r\n\r\n" .
-            $SSML_text;
-        $ws->send($message);
-
-        $ws->on('message', function ($data) use ($ws) {
-            $this->processAudioData($data, $ws);
-        });
-
-        $ws->on('close', function () {});
-    }
-
-    private function buildTTSConfigMessage(): string
-    {
-        $config = [
-            'context' => [
-                'synthesis' => [
-                    'audio' => [
-                        'metadataoptions' => [
-                            'sentenceBoundaryEnabled' => "false",
-                            'wordBoundaryEnabled' => "true"
-                        ],
-                        'outputFormat' => $this->output_format
-                    ]
-                ]
-            ]
-        ];
-
-        return "X-Timestamp:" . $this->getXTime() . "\r\n" .
-            "Content-Type:application/json; charset=utf-8\r\n" .
-            "Path:speech.config\r\n\r\n" .
-            json_encode($config) . "\r\n";
-    }
-
-    private function processAudioData($data, $ws): void
-    {
-        if (strpos($data, "Path:audio.metadata") !== false) {
-            $metadataStart = strpos($data, "\r\n\r\n") + 4;
-            $metadataJson = substr($data, $metadataStart);
-            $metadata = $this->parseMetadata($metadataJson);
-
-            if ($metadata !== null) {
-                $this->word_boundaries[] = $metadata;
-                $this->last_duration_offset = $metadata['offset'] + $metadata['duration'];
+        foreach ($this->stream($text, $voice, $options) as $chunk) {
+            if ($onChunk !== null) {
+                $onChunk($chunk);
             }
-            return;
-        }
-
-        if (strpos($data, "Path:turn.end") !== false) {
-            $this->offset_compensation = $this->last_duration_offset + 8750000; // average padding
-            $ws->close();
-            return;
-        }
-
-        $needle = "Path:audio\r\n";
-        if (strpos($data, $needle) !== false) {
-            $audioData = substr($data, strpos($data, $needle) + strlen($needle));
-            $this->audio_stream[] = $audioData;
         }
     }
 
-
     /**
-     * Generates a Sec-MS-GEC token.
+     * Speaks $text with $voice and yields the audio as it arrives:
+     *
+     *     foreach ($tts->stream('Hello', 'en-US-AriaNeural') as $chunk) {
+     *         echo $chunk;
+     *     }
+     *
+     * Leaving the loop early closes the connection. The audio is also kept,
+     * as with synthesize().
+     *
+     * @return Generator<int, string>
      */
-    private function generateSecMsGec(string $trustedClientToken, string $timeZone = 'UTC'): string
+    public function stream(string $text, string $voice = Constants::DEFAULT_VOICE, array $options = []): Generator
     {
-        $date = new DateTime('now', new DateTimeZone($timeZone));
-        $timestamp = $date->getTimestamp();
-        $ticks = (int) floor($timestamp + 11644473600);
-        $rounded = $ticks - ($ticks % 300);
-        $windowsTicks = $rounded * 10000000;
-        $data = (string) $windowsTicks . $trustedClientToken;
-        return strtoupper(hash('sha256', $data));
+        if (trim($text) === '') {
+            throw new InvalidArgumentException('The text is empty.');
+        }
+        $pitch = Protocol::formatPitch($options['pitch'] ?? null);
+        $rate = Protocol::formatRate($options['rate'] ?? null);
+        $volume = Protocol::formatVolume($options['volume'] ?? null);
+        $format = (string) ($options['outputFormat'] ?? '');
+        if ($format === '') {
+            $format = Constants::OUTPUT_FORMAT['AUDIO_24KHZ_48KBITRATE_MONO_MP3'];
+        }
+        if ($voice === '') {
+            $voice = Constants::DEFAULT_VOICE;
+        }
+
+        $this->audio = '';
+        $this->word_boundaries = [];
+        $this->output_format = $format;
+
+        $socket = $this->open();
+        try {
+            $socket->send(Protocol::speechConfigMessage($format));
+            $socket->send(Protocol::ssmlMessage(Protocol::randomHex(), Protocol::ssml($text, $voice, $pitch, $rate, $volume)));
+        } catch (EdgeTTSException $e) {
+            $socket->close();
+            throw $e;
+        }
+
+        return $this->receive($socket);
     }
 
     /**
-     * Returns the current time in the required format 
+     * @return Generator<int, string>
      */
-
-    private function getXTime(string $timeZone = 'UTC'): string
+    private function receive(WebSocket $socket): Generator
     {
         try {
-            $now = new DateTime('now', new DateTimeZone($timeZone));
-            return $now->format('D, M d, Y H:i:s T');
-        } catch (\Exception $e) {
-            throw new InvalidArgumentException("Invalid timezone: $timeZone");
+            while (true) {
+                [$opcode, $data] = $socket->receive();
+                if ($opcode === WebSocket::CLOSE) {
+                    // The service closes with a reason when it refuses the
+                    // request, such as "Unsupported voice xx-XX-Nobody."
+                    [$code, $reason] = WebSocket::closeReason($data);
+                    if ($code !== null && $code !== WebSocket::NORMAL_CLOSURE) {
+                        throw new EdgeTTSException(
+                            'The service refused the request: ' . ($reason !== '' ? $reason : "close code {$code}"),
+                            $code
+                        );
+                    }
+                    break;
+                }
+                if ($opcode === WebSocket::TEXT) {
+                    [$path, $body] = Protocol::parseTextFrame($data);
+                    if ($path === 'audio.metadata') {
+                        array_push($this->word_boundaries, ...Protocol::parseWordBoundaries($body));
+                    } elseif ($path === 'turn.end') {
+                        break;
+                    }
+                    continue;
+                }
+                [$path, $audio] = Protocol::parseBinaryFrame($data);
+                if ($path === 'audio' && $audio !== '') {
+                    $this->audio .= $audio;
+                    yield $audio;
+                }
+            }
+        } finally {
+            $socket->close();
+        }
+
+        if ($this->audio === '') {
+            throw new EmptyAudioException();
         }
     }
 
-    /**
-     * Lee el bitrate (kbps) desde el formato, ej: audio-24khz-48kbitrate-mono-mp3 -> 48.
-     */
-    private function parseBitrateKbpsFromFormat(?string $format = null): ?int
+    private function open(): WebSocket
     {
-        $format = $format ?? $this->output_format;
-        if (preg_match('/-(\d+)kbitrate-/', $format, $m)) {
-            return (int) $m[1];
+        for ($attempt = 0; ; $attempt++) {
+            $url = Constants::WSS_URL
+                . '?Ocp-Apim-Subscription-Key=' . Constants::TRUSTED_CLIENT_TOKEN
+                . '&Sec-MS-GEC=' . Protocol::secMsGec()
+                . '&Sec-MS-GEC-Version=' . Constants::SEC_MS_GEC_VERSION
+                . '&ConnectionId=' . Protocol::randomHex();
+            try {
+                return $this->connect($url, array_merge(Constants::getBaseHeaders(), Constants::WSS_HEADERS));
+            } catch (HandshakeException $e) {
+                // A refused signature usually means the local clock is off.
+                if ($e->getStatusCode() === 403 && $attempt === 0 && Protocol::adjustClock($e->getHeaders())) {
+                    continue;
+                }
+                throw $e;
+            }
         }
-        return null;
     }
 
     /**
-     * Tamaño total en bytes del audio acumulado.
+     * Opens the WebSocket connection. Tests replace it with a fake service.
+     *
+     * @param array<string, string> $headers
+     */
+    protected function connect(string $url, array $headers): WebSocket
+    {
+        return WebSocket::connect($url, $headers, $this->timeout);
+    }
+
+    /**
+     * Sends a GET request. Tests replace it with a fake service.
+     *
+     * @param array<string, string> $headers
+     * @return array{0: int, 1: array<string, string>, 2: string}
+     */
+    protected function httpGet(string $url, array $headers): array
+    {
+        return Http::get($url, $headers, $this->timeout);
+    }
+
+    /**
+     * Size of the audio in bytes.
      */
     public function getSizeBytes(): int
     {
-        if (empty($this->audio_stream)) {
-            throw new \RuntimeException("No audio data available");
-        }
-        // strlen en PHP cuenta bytes en strings binarios
         return strlen($this->toRaw());
     }
 
     /**
-     * Estima la duración (en segundos).
-     * 1) Si el formato incluye Xkbitrate, usa size_bytes / (X*1000/8).
-     * 2) Fallback: asume PCM 24kHz mono 16-bit => 48,000 bytes/s.
+     * Estimates the length of the audio in seconds from its size and
+     * bitrate. MP3 is constant bitrate; formats without one (opus) assume
+     * 48 kbit/s.
      */
     public function getDuration(): float
     {
-        if (empty($this->audio_stream)) {
-            throw new \RuntimeException("No audio data available");
-        }
-
-        $sizeBytes = $this->getSizeBytes();
-
-        // 1) Preferir bitrate declarado en el formato (más realista para MP3)
-        $kbps = $this->parseBitrateKbpsFromFormat($this->audio_format);
-        if ($kbps !== null && $kbps > 0) {
-            $bytesPerSecond = ($kbps * 1000) / 8.0; // kbps -> bytes/s
-            return $sizeBytes / $bytesPerSecond;
-        }
-
-        // 2) Fallback razonable (PCM 24kHz mono 16-bit)
-        $fallbackBytesPerSecond = 24000 * 2; // 24k muestras/s * 2 bytes
-        return $sizeBytes / $fallbackBytesPerSecond;
+        return $this->getSizeBytes() * 8 / (Protocol::kbps($this->output_format) * 1000);
     }
 
     /**
-     * Información básica del audio.
+     * @return array{size: int, format: string, estimatedDuration: float}
      */
     public function getAudioInfo(): array
     {
-        $size = $this->getSizeBytes();
-
         return [
-            'size'              => $size,
-            'format'            => $this->audio_format,
+            'size' => $this->getSizeBytes(),
+            'format' => Protocol::fileExtension($this->output_format),
             'estimatedDuration' => $this->getDuration(),
         ];
     }
 
-    public function toFile(string $output_path): void
+    /**
+     * Writes the audio to $output_path plus the extension of the output
+     * format, or $format when given, and returns the path it wrote.
+     */
+    public function toFile(string $output_path, ?string $format = null): string
     {
-        if (!empty($this->audio_stream)) {
-            file_put_contents($output_path . '.' . $this->audio_format, implode('', $this->audio_stream));
-        } else {
-            throw new RuntimeException("No audio data available to save.");
+        $path = $output_path . '.' . ($format ?? Protocol::fileExtension($this->output_format));
+        if (@file_put_contents($path, $this->toRaw()) === false) {
+            $error = error_get_last()['message'] ?? 'unknown error';
+            throw new RuntimeException("Failed to write the audio to {$path}: {$error}");
         }
+        return $path;
     }
 
+    /**
+     * The audio as a binary string.
+     */
     public function toRaw(): string
     {
-        if (empty($this->audio_stream)) {
-            throw new RuntimeException("No audio data available.");
+        if ($this->audio === '') {
+            throw new RuntimeException('No audio data available. Did you run synthesize() first?');
         }
-
-        return implode('', $this->audio_stream);
+        return $this->audio;
     }
 
     public function toBase64(): string
@@ -542,79 +331,42 @@ class EdgeTTS
         return base64_encode($this->toRaw());
     }
 
+    /**
+     * The audio as a stream resource, positioned at the start.
+     *
+     * @return resource
+     */
     public function toStream()
     {
-        if (empty($this->audio_stream)) {
-            throw new \RuntimeException("No audio data available. Did you run synthesize() first?");
-        }
-
-        $stream = fopen('php://memory', 'r+');
-        fwrite($stream, implode('', $this->audio_stream));
+        $stream = fopen('php://memory', 'r+b');
+        fwrite($stream, $this->toRaw());
         rewind($stream);
-
         return $stream;
     }
 
+    /**
+     * Writes the word boundaries to $output_path as JSON.
+     */
     public function saveMetadata(string $output_path): void
     {
-        if (empty($this->word_boundaries)) {
-            throw new \RuntimeException("No metadata available to save.");
+        if (!$this->word_boundaries) {
+            throw new RuntimeException('No metadata available to save.');
         }
-
         $json = json_encode($this->word_boundaries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-
-        if (file_put_contents($output_path, $json . PHP_EOL) === false) {
-            throw new \RuntimeException("Failed to write metadata file.");
+        if (@file_put_contents($output_path, $json . PHP_EOL) === false) {
+            $error = error_get_last()['message'] ?? 'unknown error';
+            throw new RuntimeException("Failed to write the metadata to {$output_path}: {$error}");
         }
-    }
-
-    private function parseMetadata(string $data): ?array
-    {
-        $metadata = json_decode($data, true);
-        if (!isset($metadata['Metadata'])) {
-            return null;
-        }
-
-        foreach ($metadata['Metadata'] as $meta_obj) {
-            if ($meta_obj['Type'] === 'WordBoundary') {
-                $current_offset = $meta_obj['Data']['Offset'] + $this->offset_compensation;
-                $current_duration = $meta_obj['Data']['Duration'];
-
-                return [
-                    'type' => 'WordBoundary',
-                    'offset' => $current_offset,
-                    'duration' => $current_duration,
-                    'text' => $meta_obj['Data']['text']['Text']
-                ];
-            }
-        }
-
-        return null;
-    }
-
-    public function getWordBoundaries(): array
-    {
-        return $this->word_boundaries;
     }
 
     /**
-     * Determines the file extension based on the output format.
-     * 
-     * @param string $format The audio output format
-     * @return string The corresponding file extension
+     * When each word of the last synthesis is spoken. Offset and duration
+     * are in 100-nanosecond units, as the service sends them.
+     *
+     * @return array<int, array{type: string, offset: int, duration: int, text: string}>
      */
-    private function getFileExtension(string $format): string
+    public function getWordBoundaries(): array
     {
-        if (strpos($format, 'mp3') !== false) return 'mp3';
-        if (strpos($format, 'opus') !== false && strpos($format, 'webm') !== false) return 'webm';
-        if (strpos($format, 'opus') !== false && strpos($format, 'ogg') !== false) return 'ogg';
-        if (strpos($format, 'wav') !== false || strpos($format, 'riff') !== false) return 'wav';
-        if (strpos($format, 'pcm') !== false && strpos($format, 'raw') !== false) return 'pcm';
-        if (strpos($format, 'alaw') !== false) return 'alaw';
-        if (strpos($format, 'mulaw') !== false) return 'mulaw';
-        if (strpos($format, 'truesilk') !== false) return 'silk';
-        if (strpos($format, 'g722') !== false) return 'g722';
-        if (strpos($format, 'amr') !== false) return 'amr';
-        return 'audio';
+        return $this->word_boundaries;
     }
 }

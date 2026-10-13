@@ -4,28 +4,35 @@ namespace Afaya\EdgeTTS\Config;
 
 class Constants
 {
+    public const VERSION = '1.8.3';
+
     public const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-    public const BASE_URL = 'speech.platform.bing.com/consumer/speech/synthesize/readaloud';
-    public const WSS_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
+    public const BASE_URL = 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud';
+    // NOTE: the token goes as Ocp-Apim-Subscription-Key here; Edge user agents only.
+    public const WSS_URL = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1';
     public const VOICES_URL = 'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list';
 
-    public const CHROMIUM_FULL_VERSION = '143.0.3650.75';
-    public const CHROMIUM_MAJOR_VERSION = '143';
-    public const SEC_MS_GEC_VERSION = '1-143.0.3650.75';
+    public const CHROMIUM_FULL_VERSION = '155.0.0.0';
+    public const CHROMIUM_MAJOR_VERSION = '155';
+    public const SEC_MS_GEC_VERSION = '1-155.0.4283.45';
+
+    public const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/'
+        . self::CHROMIUM_FULL_VERSION . ' Safari/537.36 Edg/' . self::CHROMIUM_FULL_VERSION;
+
+    public const DEFAULT_VOICE = 'en-US-AnaNeural';
 
     public static function token32(): string
     {
-        $bytes = random_bytes(16);
-        return strtoupper(bin2hex($bytes));
+        return strtoupper(bin2hex(random_bytes(16)));
     }
 
     public static function getBaseHeaders(): array
     {
         return [
-            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+            'User-Agent' => self::USER_AGENT,
             'Accept-Encoding' => 'gzip, deflate, br, zstd',
             'Accept-Language' => 'en-US,en;q=0.9',
-            'Cookie' => 'MUID=' . self::token32()
+            'Cookie' => 'MUID=' . self::token32(),
         ];
     }
 
@@ -33,23 +40,23 @@ class Constants
         'Pragma' => 'no-cache',
         'Cache-Control' => 'no-cache',
         'Origin' => 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
-        'Sec-WebSocket-Protocol' => 'synthesize',
-        'Sec-WebSocket-Version' => '13',
-        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.3650.75 Safari/537.36 Edg/143.0.3650.75'
+        'User-Agent' => self::USER_AGENT,
     ];
 
     public const VOICE_HEADERS = [
-        'Authority' => 'speech.platform.bing.com',
-        'Sec-CH-UA' => '" Not;A Brand";v="99", "Microsoft Edge";v="143", "Chromium";v="143"',
+        'Sec-CH-UA' => '"Microsoft Edge";v="' . self::CHROMIUM_MAJOR_VERSION . '", "Chromium";v="' . self::CHROMIUM_MAJOR_VERSION . '", "Not(A:Brand";v="24"',
         'Sec-CH-UA-Mobile' => '?0',
+        'Sec-CH-UA-Platform' => '"Windows"',
         'Accept' => '*/*',
         'Sec-Fetch-Site' => 'none',
         'Sec-Fetch-Mode' => 'cors',
-        'Sec-Fetch-Dest' => 'empty'
+        'Sec-Fetch-Dest' => 'empty',
+        // Plain JSON; the stream wrapper does not decode gzip, br or zstd.
+        'Accept-Encoding' => 'identity',
     ];
 
     // https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech?tabs=nonstreaming
-    public const OUTPUT_FORMAT = [    
+    public const OUTPUT_FORMAT = [
         'AUDIO_24KHZ_48KBITRATE_MONO_MP3' => 'audio-24khz-48kbitrate-mono-mp3',
         'AUDIO_24KHZ_96KBITRATE_MONO_MP3' => 'audio-24khz-96kbitrate-mono-mp3',
         'WEBM_24KHZ_16BIT_MONO_OPUS' => 'webm-24khz-16bit-mono-opus',

@@ -1,54 +1,32 @@
-# Edge TTS PHP
+# Edge TTS for PHP
 
-## Overview
+**Edge TTS** turns text into natural-sounding speech with the online text-to-speech service of Microsoft Edge, without Edge, Windows or an API key.
 
-**Edge TTS** is a powerful Text-to-Speech (TTS) package for PHP that leverages Microsoft Edge's speech synthesis capabilities. This package allows you to synthesize speech from text, manage voice options, and process audio streams with real-time callbacks through both programmatic and command-line interfaces.
+It is the PHP version of [`@andresaya/edge-tts`](https://github.com/andresayac/edge-tts) for Node.js. There is a Go version too: [`edge-tts-go`](https://github.com/andresayac/edge-tts-go).
 
 ## Features
 
-- **Text-to-Speech**: Convert text into natural-sounding speech using Microsoft Edge's TTS capabilities.
-- **Multiple Voices**: Access a wide variety of voices to suit your project's needs.
-- **Real-time Streaming**: Support for audio streaming with real-time processing callbacks.
-- **Word Boundaries Metadata**: Get word boundary information with precise timestamps.
-- **Flexible Export Options**: Export synthesized audio in different formats (raw, base64, file, or PHP stream).
-- **Command-Line Interface**: Use a simple CLI for easy access to functionality.
-- **Easy Integration**: Modular structure allows for seamless inclusion in existing PHP projects.
-- **Extended Compatibility**: Compatible from PHP 7.4+ to PHP 8.1+ 
+- **Text-to-speech** with more than 300 neural voices in over 100 locales.
+- **Streaming**: get the audio as it arrives, with a `foreach` or a callback.
+- **Word boundaries**: know when each word is spoken.
+- **Voice filtering** by language and gender.
+- **Pitch, rate and volume** control.
+- **No event loop**: it works inside Laravel, Symfony, WordPress or a plain script.
+- **Verified TLS**, on Windows too, without configuring a CA bundle.
+- **Command-line tool** included.
 
 ## Requirements
 
-- PHP 7.4+ (compatible up to PHP 8.1+) 
-- PHP Extensions: `json`, `curl`
-- Composer for dependency management
+- PHP 7.4 or later (tested on 7.4, 8.1, 8.2, 8.3 and 8.4)
+- The `json` and `openssl` extensions
 
 ## Installation
-
-You can install Edge TTS via Composer. Run the following command in your terminal:
 
 ```bash
 composer require afaya/edge-tts
 ```
 
-This package is a fork of the original [afaya/edge-tts](https://github.com/andresayac/edge-tts-php) package with improvements and fixes. We've downgraded the dependencies to be compatible from PHP 8.1+ to PHP 7.4+ while maintaining the original functionality .
-
-## Usage
-
-### Command-Line Interface
-
-To synthesize speech from text:
-
-```bash
-php ./vendor/bin/edge-tts edge-tts:synthesize --text "Hello, world!"
-```
-
-
-To list available voices:
-
-```bash
-php ./vendor/bin/edge-tts edge-tts:voice-list
-```
-
-### Integration into Your Project
+## Quick start
 
 ```php
 <?php
@@ -57,209 +35,190 @@ require __DIR__ . '/vendor/autoload.php';
 
 use Afaya\EdgeTTS\Service\EdgeTTS;
 
-// Initialize the EdgeTTS service
 $tts = new EdgeTTS();
+$tts->synthesize('Hello, world!', 'en-US-AriaNeural');
 
-// Get available voices
-$voices = $tts->getVoices();
-// var_dump($voices); // array -> use ShortName with the voice name
-
-// Synthesize text with options for voice, rate, volume, and pitch
-$tts->synthesize("Hello, world!", 'en-US-AriaNeural', [
-    'rate'   => '0%',   // Speech rate (range: -100% to 100%)
-    'volume' => '0%',   // Speech volume (range: -100% to 100%)
-    'pitch'  => '0Hz'   // Voice pitch (range: -100Hz to 100Hz)
-]);
-
-// Export synthesized audio in different formats
-$base64Audio = $tts->toBase64();    // Get audio as base64
-$tts->toFile("output");             // Save audio to file
-$rawAudio = $tts->toRaw();          // Get raw audio stream
+echo $tts->toFile('hello'); // hello.mp3, the extension comes from the format
 ```
 
-### Real-time Streaming Synthesis
-
-For real-time audio processing:
-
-```php
-$tts->synthesizeStream(
-    "Your text here", 
-    'en-US-AriaNeural', 
-    ['rate' => '10%'],
-    function($chunk) {
-        // Process each audio chunk in real-time
-        echo "Received chunk of " . strlen($chunk) . " bytes\n";
-        // You can stream this directly to output, save incrementally, etc.
-    }
-);
-```
-
-## Available Methods
-
-### Audio Information
-
-```php
-// Get basic audio information
-$info = $tts->getAudioInfo();
-// Returns: ['size' => bytes, 'format' => 'mp3', 'estimatedDuration' => seconds]
-
-// Get estimated duration
-$duration = $tts->getDuration();
-
-// Get size in bytes
-$size = $tts->getSizeBytes();
-```
-
-### Word Boundaries Metadata
-
-```php
-// Get word boundaries with timestamps
-$boundaries = $tts->getWordBoundaries();
-
-// Save metadata to file
-$tts->saveMetadata('metadata.json');
-```
-
-### Export Options
-After synthesizing speech, you can export the audio in various formats:
-
-- `toBase64()`: Returns the audio as a Base64 string 
-- `toFile($path)`: Saves the audio to a specified file 
-- `toRaw()`: Returns the raw audio stream
-- `toStream()`: Returns a PHP stream resource
-
-## Voice Management
-
-```php
-// Get all available voices
-$voices = $tts->getVoices();
-
-// Each voice contains information like:
-// - ShortName: The voice identifier to use in synthesis
-// - DisplayName: Human-readable voice name
-// - LocalName: Localized voice name
-// - Gender: Voice gender
-// - Locale: Language/region code
-```
-
-## Audio Configuration
-
-### Default Settings
-The package uses high-quality audio settings by default:
-- **Format**: MP3 (audio-24khz-48kbitrate-mono-mp3)
-- **Sample Rate**: 24kHz
-- **Bitrate**: 48kbps
-- **Channels**: Mono
-
-### Custom Output Format
-
-You can customize the audio output format using the `outputFormat` option. The package supports all formats provided by Microsoft Azure Speech Service:
-
-```php
-use Afaya\EdgeTTS\Service\EdgeTTS;
-use Afaya\EdgeTTS\Config\Constants;
-
-$tts = new EdgeTTS();
-
-// Use a custom output format
-$tts->synthesize("Hello, world!", 'en-US-AriaNeural', [
-    'outputFormat' => 'audio-48khz-192kbitrate-mono-mp3',
-    'rate' => '0%',
-    'pitch' => '0Hz'
-]);
-
-$tts->toFile("output"); // Will save as output.mp3
-```
-
-### Available Output Formats
-
-The package supports **36 different audio formats** through `Constants::OUTPUT_FORMAT`:
-
-#### Streaming Formats (MP3)
-- `audio-16khz-32kbitrate-mono-mp3`
-- `audio-16khz-64kbitrate-mono-mp3`
-- `audio-16khz-128kbitrate-mono-mp3`
-- `audio-24khz-48kbitrate-mono-mp3` (default)
-- `audio-24khz-96kbitrate-mono-mp3`
-- `audio-24khz-160kbitrate-mono-mp3`
-- `audio-48khz-96kbitrate-mono-mp3`
-- `audio-48khz-192kbitrate-mono-mp3`
-
-#### Opus Formats
-- `audio-16khz-16bit-32kbps-mono-opus`
-- `audio-24khz-16bit-24kbps-mono-opus`
-- `audio-24khz-16bit-48kbps-mono-opus`
-- `ogg-16khz-16bit-mono-opus`
-- `ogg-24khz-16bit-mono-opus`
-- `ogg-48khz-16bit-mono-opus`
-- `webm-16khz-16bit-mono-opus`
-- `webm-24khz-16bit-24kbps-mono-opus`
-- `webm-24khz-16bit-mono-opus`
-
-#### Raw PCM Formats
-- `raw-8khz-8bit-mono-alaw`
-- `raw-8khz-8bit-mono-mulaw`
-- `raw-8khz-16bit-mono-pcm`
-- `raw-16khz-16bit-mono-pcm`
-- `raw-16khz-16bit-mono-truesilk`
-- `raw-22050hz-16bit-mono-pcm`
-- `raw-24khz-16bit-mono-pcm`
-- `raw-24khz-16bit-mono-truesilk`
-- `raw-44100hz-16bit-mono-pcm`
-- `raw-48khz-16bit-mono-pcm`
-
-#### WAV/RIFF Formats (Non-Streaming)
-- `riff-8khz-8bit-mono-alaw`
-- `riff-8khz-8bit-mono-mulaw`
-- `riff-8khz-16bit-mono-pcm`
-- `riff-22050hz-16bit-mono-pcm`
-- `riff-24khz-16bit-mono-pcm`
-- `riff-44100hz-16bit-mono-pcm`
-- `riff-48khz-16bit-mono-pcm`
-
-#### Other Formats
-- `amr-wb-16000hz`
-- `g722-16khz-64kbps`
-
-### Testing Output Formats
-
-You can test all available formats using the included test script:
+## Command-line interface
 
 ```bash
-php test-formats.php
+# Synthesize text to hello.mp3
+php vendor/bin/edge-tts synthesize --text "Hello, world!" -o hello
+
+# Read the text from a file, with another voice and prosody
+php vendor/bin/edge-tts synthesize -f story.txt --voice es-CO-SalomeNeural -r +10% -p -5Hz -o story
+
+# List the voices
+php vendor/bin/edge-tts voice-list
 ```
 
-This will test all 36 formats and provide a detailed report showing which formats are compatible with the Edge TTS service.
+| Option | Description | Default |
+| --- | --- | --- |
+| `-t, --text` | Text to convert to audio | |
+| `-f, --file` | Input file (text) | |
+| `--voice` | Voice to use | `en-US-AriaNeural` |
+| `-r, --rate` | Rate of speech | `0%` |
+| `-l, --volume` | Volume of speech | `0%` |
+| `-p, --pitch` | Pitch of speech | `0Hz` |
+| `-o, --output` | Output file name, without extension | `output_<timestamp>` |
 
-## Error Handling
+`edge-tts:synthesize` and `edge-tts:voice-list` still work as names of the commands.
 
-The package includes comprehensive error handling:
+## API
+
+### Voices
 
 ```php
-try {
-    $tts->synthesize("Hello", 'invalid-voice');
-} catch (InvalidArgumentException $e) {
-    echo "Invalid voice: " . $e->getMessage();
-} catch (RuntimeException $e) {
-    echo "Runtime error: " . $e->getMessage();
+$voices   = $tts->getVoices();                  // every voice
+$english  = $tts->getVoicesByLanguage('en');    // en-US, en-GB, en-IN...
+$american = $tts->getVoicesByLanguage('en-US');
+$female   = $tts->getVoicesByGender('Female');
+$voice    = $tts->checkVoice('en-US-AriaNeural'); // throws InvalidArgumentException when it does not exist
+
+foreach ($voices as $voice) {
+    echo $voice['ShortName'] . ' ' . $voice['FriendlyName'] . PHP_EOL; // en-US-AriaNeural Aria (Neural) - en-US
 }
 ```
 
-## Testing
-```bash
-./vendor/bin/phpunit
+Each voice has `Name`, `OriginalName`, `ShortName`, `DisplayName`, `LocalName`, `Gender`, `Locale`, `LocaleName`, `SecondaryLocaleList`, `VoiceType`, `VoiceTag` and `FriendlyName`.
+
+### Synthesis
+
+```php
+use Afaya\EdgeTTS\Config\Constants;
+
+$tts->synthesize('Hello, world!', 'en-US-AriaNeural', [
+    'rate'         => '+50%',  // -100% and up
+    'volume'       => '-10%',  // -100% to +100%
+    'pitch'        => '+20Hz', // -100Hz to +100Hz
+    'outputFormat' => Constants::OUTPUT_FORMAT['AUDIO_24KHZ_96KBITRATE_MONO_MP3'],
+]);
 ```
 
-## Contributing
-We welcome contributions! Please read our CONTRIBUTING.md for guidelines on how to contribute to this project.
+Every option is optional, and numbers work too: `'rate' => 50` is `+50%` and `'pitch' => -5` is `-5Hz`.
+
+#### Output formats
+
+| `Constants::OUTPUT_FORMAT` key | Format | Extension |
+| --- | --- | --- |
+| `AUDIO_24KHZ_48KBITRATE_MONO_MP3` (default) | `audio-24khz-48kbitrate-mono-mp3` | `.mp3` |
+| `AUDIO_24KHZ_96KBITRATE_MONO_MP3` | `audio-24khz-96kbitrate-mono-mp3` | `.mp3` |
+| `WEBM_24KHZ_16BIT_MONO_OPUS` | `webm-24khz-16bit-mono-opus` | `.webm` |
+
+These are the only formats the service accepts. It refuses the other Azure formats (WAV, PCM, OGG, 48 kHz MP3...) with "Unsupported Edge output format".
+
+#### Matching the voice to the text
+
+Voices are locale specific. A voice can only read text written in the script of its own language, so passing Chinese, Cyrillic, Arabic or Devanagari text to an English voice returns no audio. `synthesize()` then throws `EmptyAudioException`:
+
+```php
+use Afaya\EdgeTTS\Exception\EmptyAudioException;
+
+try {
+    $tts->synthesize('这是一个测试', 'en-US-AriaNeural');
+} catch (EmptyAudioException $e) {
+    // Use a Chinese voice instead, such as zh-CN-XiaoxiaoNeural.
+}
+```
+
+### Streaming
+
+`stream()` yields the audio as it arrives, so you can start playing or sending it before the synthesis ends:
+
+```php
+header('Content-Type: audio/mpeg');
+
+foreach ($tts->stream('Long text to stream...', 'en-US-AriaNeural') as $chunk) {
+    echo $chunk;
+    flush();
+}
+```
+
+Leaving the loop early closes the connection. If you prefer a callback:
+
+```php
+$tts->synthesizeStream('Long text to stream...', 'en-US-AriaNeural', [], function (string $chunk) {
+    file_put_contents('out.mp3', $chunk, FILE_APPEND);
+});
+```
+
+### Getting the audio
+
+After `synthesize()`, `stream()` or `synthesizeStream()`:
+
+```php
+$raw    = $tts->toRaw();            // binary string
+$base64 = $tts->toBase64();         // base64 string
+$path   = $tts->toFile('out/audio'); // out/audio.mp3
+$path   = $tts->toFile('out/audio', 'bin'); // out/audio.bin
+$stream = $tts->toStream();         // php://memory resource
+
+$info = $tts->getAudioInfo();       // ['size' => 46944, 'format' => 'mp3', 'estimatedDuration' => 3.912]
+$seconds = $tts->getDuration();     // estimated from the size and bitrate
+$bytes = $tts->getSizeBytes();
+```
+
+### Word boundaries
+
+```php
+foreach ($tts->getWordBoundaries() as $word) {
+    // Offsets and durations are in 100-nanosecond units.
+    printf("%.2fs %s\n", $word['offset'] / 1e7, $word['text']);
+}
+
+$tts->saveMetadata('words.json');
+```
+
+### Errors
+
+| Exception | When |
+| --- | --- |
+| `InvalidArgumentException` | An empty text, an invalid pitch, rate or volume, or `checkVoice()` with an unknown voice |
+| `Afaya\EdgeTTS\Exception\EmptyAudioException` | The voice cannot read the text |
+| `Afaya\EdgeTTS\Exception\HandshakeException` | The service refused the connection; `getStatusCode()` has the HTTP status |
+| `Afaya\EdgeTTS\Exception\EdgeTTSException` | Any other error of the service or the network, such as "The service refused the request: Unsupported voice xx-XX-NobodyNeural." |
+| `RuntimeException` | Asking for audio or metadata before a synthesis |
+
+Every exception of the service extends `EdgeTTSException`, which extends `RuntimeException`.
+
+A machine whose clock is off by more than a few minutes is refused by the service. The client then corrects its clock from the response and tries once more.
+
+## Upgrading from 1.7 to 1.8
+
+1.7 stopped working when the service moved to a new endpoint. This version uses the new one, and also:
+
+- **Throws exceptions** when the synthesis fails, instead of printing the error and leaving no audio. They carry the reason the service gives, such as an unsupported voice or output format.
+- **No longer needs ReactPHP**, Ratchet or ramsey/uuid, so it no longer runs a global event loop.
+- **Works with `allow_url_fopen` off**, as on most shared hosting; the voice list needed it.
+- **Keeps the audio in one string**, so reading it back costs no copy: two hours of audio fit in the default 128 MB memory limit.
+- **Verifies TLS** certificates.
+- **Starts from scratch on every synthesis**: the audio and the word boundaries of the previous one used to pile up.
+- **Estimates the duration** from the bitrate of the format.
+- **Accepts numbers** for pitch, rate and volume, and any output format.
+- **Adds** `stream()`, `getVoicesByLanguage()` and `getVoicesByGender()`; `toFile()` returns the path it wrote.
+- **Fixes the CLI**: it runs with Symfony Console 5.4 to 8, from `vendor/bin`, and has the `synthesize` and `voice-list` names of the Node CLI.
+
+## Examples
+
+- [`examples/basic.php`](examples/basic.php): synthesize to a file and list voices.
+- [`examples/stream.php`](examples/stream.php): stream the audio with a generator and with a callback.
+
+## Testing
+
+```bash
+composer install
+composer test
+```
+
+The tests replay a recorded session of the service, through a fake and through a local server on real sockets, so they need no network.
 
 ## License
-This project is licensed under the GNU General Public License v3 (GPLv3).
+
+GPL-3.0-or-later. See [LICENSE.txt](LICENSE.txt).
 
 ## Acknowledgments
 
-We would like to extend our gratitude to the developers and contributors of the following projects for their inspiration and groundwork:
-
-* https://github.com/rany2/edge-tts/tree/master/examples
-* https://github.com/rany2/edge-tts/blob/master/src/edge_tts/util.py
-* https://github.com/hasscc/hass-edge-tts/blob/main/custom_components/edge_tts/tts.py
+- https://github.com/rany2/edge-tts
+- https://github.com/hasscc/hass-edge-tts
